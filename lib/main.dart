@@ -1,7 +1,9 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import 'firebase_options.dart';
+
+import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/safety_screen.dart';
 import 'screens/attendance_screen.dart';
@@ -71,9 +73,11 @@ class CampusX extends StatelessWidget {
         ),
       ),
 
-      initialRoute: '/',
+      // Login screen se testing start hogi.
+      initialRoute: '/auth',
 
       routes: {
+        '/auth': (context) => const AuthScreen(),
         '/': (context) => const HomeScreen(),
         '/safety': (context) => const SafetyScreen(),
         '/attendance': (context) => const AttendanceScreen(),

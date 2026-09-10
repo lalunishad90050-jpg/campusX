@@ -1,11 +1,185 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-class AttendanceScreen extends StatelessWidget {
+class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
 
-  void showFeatureMessage(BuildContext context, String message) {
+  @override
+  State<AttendanceScreen> createState() => _AttendanceScreenState();
+}
+
+class _AttendanceScreenState extends State<AttendanceScreen> {
+  bool isMarking = false;
+
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> get attendanceStream {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return const Stream.empty();
+    }
+
+    return _firestore
+        .collection('attendance')
+        .where('userId', isEqualTo: user.uid)
+        .orderBy('date', descending: true)
+        .snapshots();
+  }
+
+  Future<void> markAttendance(String status) async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      showMessage('Please login first.');
+      return;
+    }
+
+    setState(() => isMarking = true);
+
+    try {
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+
+      if (!userDoc.exists) {
+        showMessage('User profile nahi mila.');
+        return;
+      }
+
+      final userData = userDoc.data();
+      final collegeId = userData?['collegeId'] ?? 'Unknown';
+
+      final today = DateTime.now();
+
+      final date =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
+      final existing = await _firestore
+          .collection('attendance')
+          .where('userId', isEqualTo: user.uid)
+          .where('date', isEqualTo: date)
+          .limit(1)
+          .get();
+
+      if (existing.docs.isNotEmpty) {
+        showMessage('Aaj ki attendance already marked hai.');
+        return;
+      }
+
+      await _firestore.collection('attendance').add({
+        'collegeId': collegeId,
+        'userId': user.uid,
+        'date': date,
+        'status': status,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+
+      showMessage(
+        status == 'present'
+            ? 'Attendance marked as Present ✅'
+            : 'Attendance marked as Absent',
+      );
+    } on FirebaseException catch (e) {
+      if (!mounted) return;
+
+      showMessage('Attendance save nahi hui: ${e.message ?? 'Unknown error'}');
+    } catch (e) {
+      if (!mounted) return;
+
+      showMessage('Kuch error aa gaya. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => isMarking = false);
+      }
+    }
+  }
+
+  void showMessage(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void showAttendanceHistory(
+    BuildContext context,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> records,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.75,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Attendance History',
+                    style: Theme.of(context).textTheme.headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: records.isEmpty
+                        ? const Center(
+                            child: Text('No attendance records yet.'),
+                          )
+                        : ListView.separated(
+                            itemCount: records.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final data = records[index].data();
+                              final status = data['status'] ?? 'unknown';
+                              final date = data['date'] ?? '';
+
+                              final isPresent = status == 'present';
+
+                              return Card(
+                                child: ListTile(
+                                  leading: CircleAvatar(
+                                    child: Icon(
+                                      isPresent
+                                          ? Icons.check_rounded
+                                          : Icons.close_rounded,
+                                    ),
+                                  ),
+                                  title: Text(
+                                    isPresent ? 'Present' : 'Absent',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  subtitle: Text(date.toString()),
+                                  trailing: Text(
+                                    isPresent ? 'P' : 'A',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: isPresent
+                                          ? Colors.green
+                                          : Colors.red,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -13,286 +187,239 @@ class AttendanceScreen extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Attendance',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 27,
-                  backgroundColor: theme.colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.calendar_month,
-                    size: 30,
-                    color: theme.colorScheme.primary,
+      appBar: AppBar(title: const Text('Attendance')),
+      body: SafeArea(
+        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: attendanceStream,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Attendance load nahi ho rahi.\n\n${snapshot.error}',
+                    textAlign: TextAlign.center,
                   ),
                 ),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Attendance Dashboard 📊',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text('Track your attendance and class records.'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              );
+            }
 
-            const SizedBox(height: 24),
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-            // Attendance overview
-            Card(
-              elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(22),
-                child: Column(
-                  children: [
-                    const Text(
-                      'Overall Attendance',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+            final records = snapshot.data?.docs ?? [];
 
-                    const SizedBox(height: 18),
+            int presentCount = 0;
+            int absentCount = 0;
 
-                    SizedBox(
-                      width: 145,
-                      height: 145,
-                      child: Stack(
-                        alignment: Alignment.center,
+            for (final record in records) {
+              final status = record.data()['status'];
+
+              if (status == 'present') {
+                presentCount++;
+              } else if (status == 'absent') {
+                absentCount++;
+              }
+            }
+
+            final total = presentCount + absentCount;
+
+            final attendancePercentage = total == 0
+                ? 0.0
+                : (presentCount / total) * 100;
+
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(22),
+                      child: Column(
                         children: [
                           SizedBox(
-                            width: 145,
-                            height: 145,
-                            child: CircularProgressIndicator(
-                              value: 0.82,
-                              strokeWidth: 13,
-                              backgroundColor: Colors.grey.shade200,
+                            height: 150,
+                            width: 150,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                SizedBox(
+                                  height: 150,
+                                  width: 150,
+                                  child: CircularProgressIndicator(
+                                    value: attendancePercentage / 100,
+                                    strokeWidth: 14,
+                                    backgroundColor: theme
+                                        .colorScheme
+                                        .surfaceContainerHighest,
+                                  ),
+                                ),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '${attendancePercentage.toStringAsFixed(0)}%',
+                                      style: theme.textTheme.headlineMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                    const Text('Attendance'),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                          const Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                          const SizedBox(height: 24),
+                          Row(
                             children: [
-                              Text(
-                                '82%',
-                                style: TextStyle(
-                                  fontSize: 30,
-                                  fontWeight: FontWeight.bold,
+                              Expanded(
+                                child: _AttendanceStat(
+                                  title: 'Present',
+                                  value: '$presentCount',
+                                  icon: Icons.check_circle_outline,
                                 ),
                               ),
-                              Text(
-                                'Attendance',
-                                style: TextStyle(fontSize: 12),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _AttendanceStat(
+                                  title: 'Absent',
+                                  value: '$absentCount',
+                                  icon: Icons.cancel_outlined,
+                                ),
                               ),
                             ],
                           ),
                         ],
                       ),
                     ),
+                  ),
 
-                    const SizedBox(height: 18),
+                  const SizedBox(height: 20),
 
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        'Good attendance',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.onPrimaryContainer,
-                        ),
+                  Text(
+                    'Mark Attendance',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  ElevatedButton.icon(
+                    onPressed: isMarking
+                        ? null
+                        : () => markAttendance('present'),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Mark Present'),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  OutlinedButton.icon(
+                    onPressed: isMarking
+                        ? null
+                        : () => markAttendance('absent'),
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: const Text('Mark Absent'),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Attendance Tools',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+
+                          _ToolTile(
+                            icon: Icons.history_rounded,
+                            title: 'Attendance History',
+                            subtitle: 'View your attendance records',
+                            onTap: () {
+                              showAttendanceHistory(context, records);
+                            },
+                          ),
+
+                          _ToolTile(
+                            icon: Icons.analytics_outlined,
+                            title: 'Analytics',
+                            subtitle: 'Track your attendance percentage',
+                            onTap: () {
+                              showMessage(
+                                'Current attendance: ${attendancePercentage.toStringAsFixed(1)}%',
+                              );
+                            },
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Quick statistics
-            Row(
-              children: [
-                Expanded(
-                  child: _MiniStatCard(
-                    icon: Icons.check_circle_outline,
-                    value: '41',
-                    label: 'Present',
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _MiniStatCard(
-                    icon: Icons.cancel_outlined,
-                    value: '9',
-                    label: 'Absent',
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 26),
-
-            const Text(
-              'Attendance Tools',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 12),
-
-            _AttendanceCard(
-              icon: Icons.camera_alt_outlined,
-              title: 'Mark Attendance',
-              subtitle: 'Use the attendance system to mark your presence',
-              onTap: () {
-                showFeatureMessage(
-                  context,
-                  'Attendance marking feature coming next.',
-                );
-              },
-            ),
-
-            _AttendanceCard(
-              icon: Icons.calendar_month_outlined,
-              title: 'Attendance History',
-              subtitle: 'View your previous attendance records',
-              onTap: () {
-                showFeatureMessage(context, 'Attendance history coming next.');
-              },
-            ),
-
-            _AttendanceCard(
-              icon: Icons.analytics_outlined,
-              title: 'Attendance Analytics',
-              subtitle: 'Check your attendance performance',
-              onTap: () {
-                showFeatureMessage(
-                  context,
-                  'Attendance analytics coming next.',
-                );
-              },
-            ),
-
-            _AttendanceCard(
-              icon: Icons.notifications_none,
-              title: 'Attendance Alerts',
-              subtitle: 'Get alerts for low attendance',
-              onTap: () {
-                showFeatureMessage(context, 'Attendance alerts coming next.');
-              },
-            ),
-
-            const SizedBox(height: 8),
-
-            // Info card
-            Card(
-              elevation: 1,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, color: theme.colorScheme.primary),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text(
-                        'Keep your attendance above the required percentage to stay eligible for examinations.',
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class _MiniStatCard extends StatelessWidget {
-  final IconData icon;
+class _AttendanceStat extends StatelessWidget {
+  final String title;
   final String value;
-  final String label;
+  final IconData icon;
 
-  const _MiniStatCard({
-    required this.icon,
+  const _AttendanceStat({
+    required this.title,
     required this.value,
-    required this.label,
+    required this.icon,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              child: Icon(icon, color: theme.colorScheme.primary),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: theme.colorScheme.primary),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
             ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  label,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+          Text(title),
+        ],
       ),
     );
   }
 }
 
-class _AttendanceCard extends StatelessWidget {
+class _ToolTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
 
-  const _AttendanceCard({
+  const _ToolTile({
     required this.icon,
     required this.title,
     required this.subtitle,
@@ -301,35 +428,13 @@ class _AttendanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 8,
-          ),
-          leading: CircleAvatar(
-            radius: 24,
-            backgroundColor: theme.colorScheme.primaryContainer,
-            child: Icon(icon, color: theme.colorScheme.primary),
-          ),
-          title: Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 5),
-            child: Text(subtitle),
-          ),
-          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-        ),
-      ),
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: CircleAvatar(child: Icon(icon)),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+      onTap: onTap,
     );
   }
 }

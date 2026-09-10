@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 
 class SafetyScreen extends StatefulWidget {
   const SafetyScreen({super.key});
@@ -9,18 +10,94 @@ class SafetyScreen extends StatefulWidget {
 }
 
 class _SafetyScreenState extends State<SafetyScreen> {
-  String? selectedType;
+  final descriptionController = TextEditingController();
 
-  final TextEditingController descriptionController = TextEditingController();
+  String selectedType = 'Dark Area';
+  bool isSubmitting = false;
 
   final List<String> reportTypes = [
     'Dark Area',
     'Broken Light',
     'Suspicious Activity',
+    'Unsafe Area',
     'Other',
   ];
 
-  bool isSubmitting = false;
+  Future<void> submitReport() async {
+    final description = descriptionController.text.trim();
+
+    if (description.isEmpty) {
+      showMessage('Please report ka description likho.');
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      showMessage('Report submit karne ke liye pehle login karo.');
+      return;
+    }
+
+    setState(() => isSubmitting = true);
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final userData = userDoc.data();
+      final collegeId = userData?['collegeId'] ?? 'Unknown';
+
+      await FirebaseFirestore.instance.collection('safety_reports').add({
+        'collegeId': collegeId,
+        'userId': user.uid,
+        'reportType': selectedType,
+        'description': description,
+        'status': 'new',
+        'location': 'Campus location not added yet',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      descriptionController.clear();
+
+      if (!mounted) return;
+
+      await showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Report Submitted ✅'),
+            content: const Text(
+              'Your safety report has been successfully sent to the admin.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    } on FirebaseException catch (e) {
+      showMessage(
+        'Report submit nahi ho payi: ${e.message ?? 'Unknown error'}',
+      );
+    } catch (e) {
+      showMessage('Kuch error aa gaya. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => isSubmitting = false);
+      }
+    }
+  }
+
+  void showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   void dispose() {
@@ -28,276 +105,174 @@ class _SafetyScreenState extends State<SafetyScreen> {
     super.dispose();
   }
 
-  Future<void> submitReport() async {
-    if (selectedType == null || descriptionController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a report type and add a description.'),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      isSubmitting = true;
-    });
-
-    try {
-      await FirebaseFirestore.instance.collection('safety_reports').add({
-        'reportType': selectedType,
-        'description': descriptionController.text.trim(),
-        'status': 'new',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      if (!mounted) return;
-
-      setState(() {
-        isSubmitting = false;
-      });
-
-      showDialog(
-        context: context,
-        builder: (dialogContext) {
-          return AlertDialog(
-            icon: Icon(
-              Icons.check_circle,
-              size: 52,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            title: const Text('Report Submitted!'),
-            content: const Text(
-              'Thank you. Your campus safety report has been recorded.',
-              textAlign: TextAlign.center,
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-
-                  setState(() {
-                    selectedType = null;
-                    descriptionController.clear();
-                  });
-                },
-                child: const Text('Done'),
-              ),
-            ],
-          );
-        },
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        isSubmitting = false;
-      });
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Failed to submit report: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Campus Safety',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 27,
-                  backgroundColor: theme.colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.security,
-                    size: 30,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      appBar: AppBar(title: const Text('Campus Safety')),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
                     children: [
-                      Text(
-                        'Report an Unsafe Area 🚨',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
+                      CircleAvatar(
+                        radius: 28,
+                        backgroundColor: theme.colorScheme.primaryContainer,
+                        child: Icon(
+                          Icons.shield_outlined,
+                          size: 30,
+                          color: theme.colorScheme.primary,
                         ),
                       ),
-                      SizedBox(height: 5),
-                      Text(
-                        'Help make your campus safer.',
-                        style: TextStyle(fontSize: 14),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Report an Unsafe Spot',
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'Help make your campus safer.',
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // Location
-            const Text(
-              'Location',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 8),
-
-            Card(
-              elevation: 2,
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 6,
-                ),
-                leading: CircleAvatar(
-                  backgroundColor: theme.colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.location_on,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                title: const Text(
-                  'Campus Location',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: const Text('Select location on campus map'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Map feature coming next.')),
-                  );
-                },
               ),
-            ),
 
-            const SizedBox(height: 22),
+              const SizedBox(height: 20),
 
-            // Report type
-            const Text(
-              'Report Type',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 8),
-
-            DropdownButtonFormField<String>(
-              initialValue: selectedType,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.category_outlined),
-                border: OutlineInputBorder(),
-                hintText: 'Select an issue',
-              ),
-              items: reportTypes.map((type) {
-                return DropdownMenuItem(value: type, child: Text(type));
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  selectedType = value;
-                });
-              },
-            ),
-
-            const SizedBox(height: 22),
-
-            // Description
-            const Text(
-              'Description',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 8),
-
-            TextField(
-              controller: descriptionController,
-              maxLines: 5,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                prefixIcon: Padding(
-                  padding: EdgeInsets.only(bottom: 85),
-                  child: Icon(Icons.description_outlined),
-                ),
-                border: OutlineInputBorder(),
-                hintText: 'Describe the safety issue in detail...',
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Submit button
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton.icon(
-                onPressed: isSubmitting ? null : submitReport,
-                icon: isSubmitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send),
-                label: Text(
-                  isSubmitting ? 'Submitting...' : 'Submit Safety Report',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 18),
-
-            // Privacy information
-            Card(
-              elevation: 1,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.privacy_tip_outlined,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Safety & Privacy',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Your report is intended to help improve campus safety.',
-                          ),
-                        ],
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Report Type',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 10),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedType,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.report_problem_outlined),
+                          labelText: 'Select issue',
+                        ),
+                        items: reportTypes.map((type) {
+                          return DropdownMenuItem(
+                            value: type,
+                            child: Text(type),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => selectedType = value);
+                          }
+                        },
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      TextField(
+                        controller: descriptionController,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          labelText: 'Description',
+                          hintText: 'Describe the safety issue...',
+                          prefixIcon: Padding(
+                            padding: EdgeInsets.only(bottom: 75),
+                            child: Icon(Icons.description_outlined),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.location_on_outlined),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Campus location will be added in the next step.',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      ElevatedButton.icon(
+                        onPressed: isSubmitting ? null : submitReport,
+                        icon: isSubmitting
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.send_rounded),
+                        label: Text(
+                          isSubmitting ? 'Submitting...' : 'Submit Report',
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+
+              const SizedBox(height: 16),
+
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.privacy_tip_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Your College ID is attached to the report so the admin can identify the registered account that submitted it.',
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
