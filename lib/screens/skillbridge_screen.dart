@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -13,15 +14,14 @@ class SkillBridgeScreen extends StatefulWidget {
 class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
   final TextEditingController jobController = TextEditingController();
 
-  bool resumeUploaded = false;
   bool isAnalyzing = false;
+  PlatformFile? selectedResume;
 
   int matchPercentage = 0;
   List<String> matchedSkills = [];
   List<String> missingSkills = [];
   List<Map<String, dynamic>> roadmap = [];
 
-  // CampusX online AI backend
   static const String apiUrl =
       'https://campusx-backend-43jp.onrender.com/skillbridge/analyze';
 
@@ -31,17 +31,41 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
     super.dispose();
   }
 
-  void uploadResume() {
-    setState(() {
-      resumeUploaded = true;
-    });
+  Future<void> uploadResume() async {
+    try {
+      final file = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'docx'],
+      );
 
-    showMessage('Resume uploaded successfully ✅');
+      if (file == null) {
+        return;
+      }
+
+      final bytes = await file.readAsBytes();
+
+      if (bytes.isEmpty) {
+        showMessage('Selected file empty hai. Dusri file try karo.');
+        return;
+      }
+
+      setState(() {
+        selectedResume = file;
+        matchPercentage = 0;
+        matchedSkills = [];
+        missingSkills = [];
+        roadmap = [];
+      });
+
+      showMessage('Resume selected successfully ✅');
+    } catch (e) {
+      showMessage('Resume select nahi ho paya. Please try again.');
+    }
   }
 
   Future<void> analyzeResume() async {
-    if (!resumeUploaded) {
-      showMessage('Please upload your resume first.');
+    if (selectedResume == null) {
+      showMessage('Please upload your PDF/DOCX resume first.');
       return;
     }
 
@@ -55,23 +79,40 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
     });
 
     try {
-      final response = await http
-          .post(
-            Uri.parse(apiUrl),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'resume_text': 'Python SQL Git Flutter Firebase Data Analysis Machine Learning Dart',
-              'job_description': jobController.text.trim(),
-            }),
-          )
-          .timeout(const Duration(seconds: 60));
+      final resumeBytes = await selectedResume!.readAsBytes();
+
+      if (resumeBytes.isEmpty) {
+        showMessage('Resume file empty hai. Please upload again.');
+        return;
+      }
+
+      final request = http.MultipartRequest('POST', Uri.parse(apiUrl));
+
+      request.fields['job_description'] = jobController.text.trim();
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'resume',
+          resumeBytes,
+          filename: selectedResume!.name,
+        ),
+      );
+
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 90),
+      );
+
+      final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode != 200) {
         String message = 'Server error: ${response.statusCode}';
 
         try {
           final errorData = jsonDecode(response.body);
-          message = errorData['detail']?.toString() ?? message;
+
+          if (errorData is Map && errorData['detail'] != null) {
+            message = errorData['detail'].toString();
+          }
         } catch (_) {}
 
         showMessage(message);
@@ -79,6 +120,11 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
       }
 
       final data = jsonDecode(response.body);
+
+      if (data is! Map) {
+        showMessage('AI returned an invalid response.');
+        return;
+      }
 
       final newMatchPercentage =
           (data['match_percentage'] as num?)?.toInt() ?? 0;
@@ -105,7 +151,7 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
       if (!mounted) return;
 
       setState(() {
-        matchPercentage = newMatchPercentage;
+        matchPercentage = newMatchPercentage.clamp(0, 100);
         matchedSkills = newMatchedSkills;
         missingSkills = newMissingSkills;
         roadmap = newRoadmap;
@@ -115,7 +161,7 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      showMessage('Backend se connection nahi ho pa raha. Please try again.');
+      showMessage('AI analysis nahi ho pa rahi. Backend/server check karo.');
     } finally {
       if (mounted) {
         setState(() {
@@ -158,6 +204,7 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
                         final item = roadmap[index];
 
                         final week = item['week'] ?? index + 1;
+
                         final title = item['title'] ?? 'Learning Plan';
 
                         final skills =
@@ -270,7 +317,7 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 const Text(
-                                  'Compare your skills with a job description.',
+                                  'Upload your resume and compare it with a job.',
                                 ),
                               ],
                             ),
@@ -281,33 +328,65 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
                       OutlinedButton.icon(
                         onPressed: isAnalyzing ? null : uploadResume,
                         icon: Icon(
-                          resumeUploaded
+                          selectedResume != null
                               ? Icons.check_circle
                               : Icons.upload_file,
                         ),
                         label: Text(
-                          resumeUploaded ? 'Resume Uploaded' : 'Upload Resume',
+                          selectedResume != null
+                              ? 'Change Resume'
+                              : 'Upload Resume',
                         ),
                       ),
-                      if (resumeUploaded) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Demo resume loaded. PDF/DOCX file picker can be connected later.',
-                          style: theme.textTheme.bodySmall,
+                      if (selectedResume != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                selectedResume!.extension?.toLowerCase() ==
+                                        'pdf'
+                                    ? Icons.picture_as_pdf
+                                    : Icons.description,
+                                color: theme.colorScheme.primary,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  selectedResume!.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const Icon(
+                                Icons.check_circle,
+                                color: Colors.green,
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ],
                   ),
                 ),
               ),
+
               const SizedBox(height: 20),
+
               Text(
                 'Job Description',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
+
               const SizedBox(height: 10),
+
               TextField(
                 controller: jobController,
                 maxLines: 7,
@@ -316,7 +395,9 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
                   alignLabelWithHint: true,
                 ),
               ),
+
               const SizedBox(height: 16),
+
               ElevatedButton.icon(
                 onPressed: isAnalyzing ? null : analyzeResume,
                 icon: isAnalyzing
@@ -326,17 +407,25 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.auto_awesome),
-                label: Text(isAnalyzing ? 'Analyzing...' : 'Analyze with AI'),
+                label: Text(
+                  isAnalyzing ? 'Analyzing Resume...' : 'Analyze with AI',
+                ),
               ),
-              if (matchPercentage > 0 || matchedSkills.isNotEmpty) ...[
+
+              if (matchPercentage > 0 ||
+                  matchedSkills.isNotEmpty ||
+                  missingSkills.isNotEmpty) ...[
                 const SizedBox(height: 24),
+
                 Text(
                   'AI Analysis Result',
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+
                 const SizedBox(height: 12),
+
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(20),
@@ -372,13 +461,17 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
                             ],
                           ),
                         ),
+
                         const SizedBox(height: 24),
+
                         _SkillSection(
                           title: 'Matched Skills',
                           skills: matchedSkills,
                           icon: Icons.check_circle_outline,
                         ),
+
                         const SizedBox(height: 18),
+
                         _SkillSection(
                           title: 'Missing Skills',
                           skills: missingSkills,
@@ -388,14 +481,18 @@ class _SkillBridgeScreenState extends State<SkillBridgeScreen> {
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 14),
+
                 OutlinedButton.icon(
                   onPressed: showRoadmap,
                   icon: const Icon(Icons.route_rounded),
                   label: const Text('View Learning Roadmap'),
                 ),
               ],
+
               const SizedBox(height: 24),
+
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(18),

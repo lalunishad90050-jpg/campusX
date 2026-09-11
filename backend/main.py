@@ -3,22 +3,18 @@ import os
 from io import BytesIO
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from openai import OpenAI
 from pydantic import BaseModel
 
-
 load_dotenv()
 
-
 app = FastAPI(title="CampusX Backend")
-
 
 api_key = os.getenv("OPENAI_API_KEY")
 
 if not api_key:
     raise RuntimeError("OPENAI_API_KEY is not configured.")
-
 
 client = OpenAI(api_key=api_key)
 
@@ -26,11 +22,6 @@ client = OpenAI(api_key=api_key)
 # ============================================================
 # REQUEST MODELS
 # ============================================================
-
-
-class SkillBridgeRequest(BaseModel):
-    resume_text: str
-    job_description: str
 
 
 class ExamWarriorRequest(BaseModel):
@@ -88,63 +79,267 @@ def health():
 
 
 @app.post("/skillbridge/analyze")
-def skillbridge_analyze(request: SkillBridgeRequest):
+async def skillbridge_analyze(
+    resume: UploadFile = File(...),
+    job_description: str = Form(...),
+):
+    if not resume.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="No resume file selected.",
+        )
 
-    prompt = f"""
-You are an AI career assistant for a college student.
+    filename = resume.filename.lower()
 
-Analyze the resume against the job description.
+    if not filename.endswith((".pdf", ".docx")):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF and DOCX resumes are supported.",
+        )
 
-Resume:
-{request.resume_text}
-
-Job Description:
-{request.job_description}
-
-Return ONLY valid JSON in this exact structure:
-
-{{
-    "match_percentage": 0,
-    "matched_skills": [],
-    "missing_skills": [],
-    "roadmap": [
-        {{
-            "week": 1,
-            "title": "",
-            "tasks": []
-        }},
-        {{
-            "week": 2,
-            "title": "",
-            "tasks": []
-        }},
-        {{
-            "week": 3,
-            "title": "",
-            "tasks": []
-        }},
-        {{
-            "week": 4,
-            "title": "",
-            "tasks": []
-        }}
-    ]
-}}
-
-match_percentage must be between 0 and 100.
-matched_skills and missing_skills must be arrays of strings.
-The roadmap must contain exactly 4 weeks.
-"""
+    if not job_description.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Job description is required.",
+        )
 
     try:
+        file_bytes = await resume.read()
+
+        if not file_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded resume is empty.",
+            )
+
+        # Maximum file size: 10 MB
+        if len(file_bytes) > 10 * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail="Resume file is too large. Maximum size is 10 MB.",
+            )
+
+        # ----------------------------------------------------
+        # PDF TEXT EXTRACTION
+        # ----------------------------------------------------
+
+        if filename.endswith(".pdf"):
+            from pypdf import PdfReader
+
+            reader = PdfReader(BytesIO(file_bytes))
+
+            text_parts = []
+
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+
+                if page_text.strip():
+                    text_parts.append(page_text)
+
+            resume_text = "\n".join(text_parts).strip()
+
+        # ----------------------------------------------------
+        # DOCX TEXT EXTRACTION
+        # ----------------------------------------------------
+
+        else:
+            from docx import Document
+
+            document = Document(BytesIO(file_bytes))
+
+            text_parts = []
+
+            # Normal paragraphs
+            for paragraph in document.paragraphs:
+                text = paragraph.text.strip()
+
+                if text:
+                    text_parts.append(text)
+
+            # Tables
+            for table in document.tables:
+                for row in table.rows:
+                    cells = []
+
+                    for cell in row.cells:
+                        cell_text = cell.text.strip()
+
+                        if cell_text:
+                            cells.append(cell_text)
+
+                    if cells:
+                        text_parts.append(" | ".join(cells))
+
+            resume_text = "\n".join(text_parts).strip()
+
+        # ----------------------------------------------------
+        # CHECK EXTRACTED TEXT
+        # ----------------------------------------------------
+
+        if not resume_text:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Could not extract text from this resume. "
+                    "If this is a scanned/image-only PDF, please "
+                    "use a text-based PDF or DOCX."
+                ),
+            )
+
+        # Limit AI input size
+        resume_text = resume_text[:30000]
+        job_description = job_description.strip()[:20000]
+
+        # ----------------------------------------------------
+        # SKILLBRIDGE AI PROMPT
+        # ----------------------------------------------------
+
+        prompt = f"""
+You are SkillBridge AI, a career assistant for a college student.
+
+Analyze the student's ACTUAL resume against the provided job
+description.
+
+Do not invent skills, experience, projects, certifications,
+education, or achievements that are not present in the resume.
+
+RESUME:
+
+{resume_text}
+
+JOB DESCRIPTION:
+
+{job_description}
+
+Calculate an estimated skill match from 0 to 100.
+
+Return ONLY valid JSON in exactly this structure:
+
+{{
+  "match_percentage": 0,
+  "matched_skills": [],
+  "missing_skills": [],
+  "roadmap": [
+    {{
+      "week": 1,
+      "title": "",
+      "tasks": []
+    }},
+    {{
+      "week": 2,
+      "title": "",
+      "tasks": []
+    }},
+    {{
+      "week": 3,
+      "title": "",
+      "tasks": []
+    }},
+    {{
+      "week": 4,
+      "title": "",
+      "tasks": []
+    }}
+  ]
+}}
+
+Rules:
+
+- match_percentage must be a number between 0 and 100.
+- matched_skills must contain only skills actually present
+  in the resume and relevant to the job.
+- missing_skills must contain skills required or strongly
+  preferred by the job but missing from the resume.
+- matched_skills and missing_skills must be arrays of strings.
+- roadmap must contain exactly 4 weeks.
+- Each week must contain a title and an array of practical tasks.
+- The roadmap should focus on learning the missing skills.
+- Keep the roadmap realistic for a college student.
+- Do not claim that the student has skills that are not
+  supported by the resume.
+- Do not add Markdown.
+- Do not add text before or after the JSON.
+"""
+
         response = client.responses.create(
             model="gpt-5.6-luna",
             input=prompt,
         )
 
-        result = json.loads(response.output_text)
+        # ----------------------------------------------------
+        # CLEAN AI OUTPUT
+        # ----------------------------------------------------
 
-        return result
+        raw_output = response.output_text.strip()
+
+        if raw_output.startswith("```json"):
+            raw_output = raw_output[len("```json"):].strip()
+
+        elif raw_output.startswith("```"):
+            raw_output = raw_output[len("```"):].strip()
+
+        if raw_output.endswith("```"):
+            raw_output = raw_output[:-3].strip()
+
+        start = raw_output.find("{")
+        end = raw_output.rfind("}")
+
+        if start != -1 and end != -1 and end > start:
+            raw_output = raw_output[start:end + 1]
+
+        result = json.loads(raw_output)
+
+        # ----------------------------------------------------
+        # VALIDATE RESULT
+        # ----------------------------------------------------
+
+        match_percentage = result.get(
+            "match_percentage",
+            0,
+        )
+
+        if not isinstance(match_percentage, (int, float)):
+            match_percentage = 0
+
+        match_percentage = max(
+            0,
+            min(100, match_percentage),
+        )
+
+        matched_skills = result.get(
+            "matched_skills",
+            [],
+        )
+
+        missing_skills = result.get(
+            "missing_skills",
+            [],
+        )
+
+        roadmap = result.get(
+            "roadmap",
+            [],
+        )
+
+        if not isinstance(matched_skills, list):
+            matched_skills = []
+
+        if not isinstance(missing_skills, list):
+            missing_skills = []
+
+        if not isinstance(roadmap, list):
+            roadmap = []
+
+        return {
+            "match_percentage": match_percentage,
+            "matched_skills": matched_skills,
+            "missing_skills": missing_skills,
+            "roadmap": roadmap,
+            "resume_filename": resume.filename,
+        }
+
+    except HTTPException:
+        raise
 
     except json.JSONDecodeError:
         raise HTTPException(
@@ -192,10 +387,11 @@ Requirements:
 Return ONLY this JSON object:
 
 {{
-    "question": "Your generated question here"
+  "question": "Your generated question here"
 }}
 
 The "question" field must contain a non-empty string.
+
 Do not use Markdown code fences.
 Do not add text before or after the JSON.
 """
@@ -208,10 +404,6 @@ Do not add text before or after the JSON.
 
         raw_output = response.output_text.strip()
 
-        # ----------------------------------------------------
-        # Clean accidental Markdown code fences
-        # ----------------------------------------------------
-
         if raw_output.startswith("```json"):
             raw_output = raw_output[len("```json"):].strip()
 
@@ -221,19 +413,11 @@ Do not add text before or after the JSON.
         if raw_output.endswith("```"):
             raw_output = raw_output[:-3].strip()
 
-        # ----------------------------------------------------
-        # Handle accidental extra text around JSON
-        # ----------------------------------------------------
-
         start = raw_output.find("{")
         end = raw_output.rfind("}")
 
         if start != -1 and end != -1 and end > start:
             raw_output = raw_output[start:end + 1]
-
-        # ----------------------------------------------------
-        # Parse JSON
-        # ----------------------------------------------------
 
         result = json.loads(raw_output)
 
@@ -359,12 +543,12 @@ Important:
 Use exactly this structure:
 
 {{
-    "similarity_percentage": 0,
-    "originality_percentage": 0,
-    "ai_percentage": 0,
-    "summary": "",
-    "matched_areas": [],
-    "recommendations": []
+  "similarity_percentage": 0,
+  "originality_percentage": 0,
+  "ai_percentage": 0,
+  "summary": "",
+  "matched_areas": [],
+  "recommendations": []
 }}
 
 Rules:
@@ -422,10 +606,7 @@ Rules:
         raise HTTPException(
             status_code=500,
             detail=f"CopyCatcher AI error: {str(e)}",
-        )
-
-
-# ============================================================
+        )# ============================================================
 # CAMPUSSHIELD AI
 # ============================================================
 
@@ -460,13 +641,13 @@ Recent reports:
 Return ONLY valid JSON:
 
 {{
-    "risk_score": 0,
-    "risk_level": "Low",
-    "category": "",
-    "severity": "",
-    "reason": "",
-    "recommended_action": "",
-    "time_risk": ""
+  "risk_score": 0,
+  "risk_level": "Low",
+  "category": "",
+  "severity": "",
+  "reason": "",
+  "recommended_action": "",
+  "time_risk": ""
 }}
 
 Rules:
@@ -588,12 +769,12 @@ Recent attendance records:
 Return ONLY valid JSON:
 
 {{
-    "attendance_percentage": 0,
-    "status": "Good",
-    "risk_level": "Low",
-    "insight": "",
-    "recommendation": "",
-    "trend": ""
+  "attendance_percentage": 0,
+  "status": "Good",
+  "risk_level": "Low",
+  "insight": "",
+  "recommendation": "",
+  "trend": ""
 }}
 
 Rules:
@@ -693,12 +874,12 @@ Recent class summary:
 Return ONLY valid JSON:
 
 {{
-    "class_status": "Good",
-    "overall_percentage": 0,
-    "low_attendance_students": [],
-    "high_attendance_students": [],
-    "insight": "",
-    "recommendation": ""
+  "class_status": "Good",
+  "overall_percentage": 0,
+  "low_attendance_students": [],
+  "high_attendance_students": [],
+  "insight": "",
+  "recommendation": ""
 }}
 
 Rules:
