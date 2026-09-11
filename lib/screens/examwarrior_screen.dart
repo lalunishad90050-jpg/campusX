@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 class ExamWarriorScreen extends StatefulWidget {
   const ExamWarriorScreen({super.key});
@@ -10,6 +13,9 @@ class ExamWarriorScreen extends StatefulWidget {
 
 class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  static const String apiUrl =
+      'https://campusx-backend-43jp.onrender.com/examwarrior/generate';
 
   String selectedSubject = 'All';
   String selectedUnit = 'All';
@@ -30,6 +36,8 @@ class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
   }
 
   void showMessage(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
@@ -153,29 +161,81 @@ class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
     return theme.colorScheme.primary;
   }
 
-  void generatePracticeQuestion() {
+  Future<void> generatePracticeQuestion() async {
+    if (generatorSubject.isEmpty ||
+        generatorUnit.isEmpty ||
+        generatorTopic.isEmpty) {
+      showMessage('Please select Subject, Unit and Topic.');
+      return;
+    }
+
     setState(() {
       isGenerating = true;
       generatedQuestion = null;
     });
 
-    Future.delayed(const Duration(milliseconds: 700), () {
+    try {
+      final response = await http
+          .post(
+            Uri.parse(apiUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'subject': generatorSubject,
+              'unit': generatorUnit,
+              'topic': generatorTopic,
+              'difficulty': generatorDifficulty,
+            }),
+          )
+          .timeout(const Duration(seconds: 60));
+
       if (!mounted) return;
 
-      final questions = <String>[
-        'Explain the concept of $generatorTopic with a suitable example.',
-        'Solve a $generatorDifficulty level problem based on $generatorTopic.',
-        'Write the important steps used to solve a problem from $generatorTopic.',
-        'What are the key formulas and concepts related to $generatorTopic?',
-      ];
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = jsonDecode(response.body);
 
-      final index = DateTime.now().millisecond % questions.length;
+        final question = data['question']?.toString();
 
-      setState(() {
-        generatedQuestion = questions[index];
-        isGenerating = false;
-      });
-    });
+        if (question == null || question.isEmpty) {
+          throw Exception('AI returned an empty question.');
+        }
+
+        setState(() {
+          generatedQuestion = question;
+        });
+      } else {
+        String message = 'AI request failed.';
+
+        try {
+          final errorData = jsonDecode(response.body);
+
+          if (errorData is Map && errorData['detail'] != null) {
+            message = errorData['detail'].toString();
+          }
+        } catch (_) {}
+
+        throw Exception(message);
+      }
+    } on http.ClientException {
+      if (!mounted) return;
+
+      showMessage('Backend se connection nahi ho pa raha.');
+    } on FormatException {
+      if (!mounted) return;
+
+      showMessage('Backend ne invalid response diya.');
+    } catch (e) {
+      if (!mounted) return;
+
+      final message = e.toString().replaceFirst('Exception: ', '');
+
+      showMessage('Question generate nahi hua: $message');
+    } finally {
+      if (mounted) {
+        setState(() {
+          isGenerating = false;
+        });
+      }
+    }
   }
 
   void showTopicDetails(String topic, int frequency, String priority) {
@@ -288,7 +348,7 @@ class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
             const SizedBox(height: 8),
 
             const Text(
-              'Generate practice questions based on your selected topic.',
+              'Generate real AI practice questions from your selected topic.',
             ),
 
             const SizedBox(height: 18),
@@ -411,7 +471,9 @@ class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.auto_awesome),
-              label: Text(isGenerating ? 'Generating...' : 'Generate Question'),
+              label: Text(
+                isGenerating ? 'Generating with AI...' : 'Generate AI Question',
+              ),
             ),
 
             if (generatedQuestion != null) ...[
@@ -426,15 +488,28 @@ class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Generated Question',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.auto_awesome,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'AI Generated Question',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 10),
+
+                    const SizedBox(height: 12),
+
                     Text(generatedQuestion!, style: theme.textTheme.bodyLarge),
+
                     const SizedBox(height: 14),
+
                     Text(
                       '$generatorSubject • $generatorUnit • '
                       '$generatorTopic • $generatorDifficulty',
@@ -476,6 +551,7 @@ class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
           }
 
           final records = snapshot.data?.docs ?? [];
+
           final subjects = getSubjects(records);
           final units = getUnits(records);
           final topics = getGeneratorTopics(records);
@@ -625,7 +701,9 @@ class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
                         },
                       ),
                     ),
+
                     const SizedBox(width: 12),
+
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         initialValue: units.contains(selectedUnit)
@@ -654,7 +732,6 @@ class _ExamWarriorScreenState extends State<ExamWarriorScreen> {
                 ),
 
                 const SizedBox(height: 16),
-
                 if (sortedTopics.isEmpty)
                   Card(
                     child: const Padding(

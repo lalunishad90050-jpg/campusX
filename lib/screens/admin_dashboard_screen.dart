@@ -46,6 +46,21 @@ class AdminDashboardScreen extends StatelessWidget {
     return Theme.of(context).colorScheme.primary;
   }
 
+  Color riskColor(String risk) {
+    switch (risk.toLowerCase()) {
+      case 'critical':
+        return Colors.red.shade900;
+      case 'high':
+        return Colors.red;
+      case 'medium':
+        return Colors.orange;
+      case 'low':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+
   void showReportDetails(BuildContext context, Map<String, dynamic> data) {
     final type = (data['reportType'] ?? 'Unknown').toString();
 
@@ -58,15 +73,31 @@ class AdminDashboardScreen extends StatelessWidget {
     final latitude = data['latitude'];
     final longitude = data['longitude'];
 
+    final riskScore = data['aiRiskScore'];
+
+    final riskLevel = (data['aiRiskLevel'] ?? 'Not analyzed').toString();
+
+    final category = (data['aiCategory'] ?? 'Unknown').toString();
+
+    final severity = (data['aiSeverity'] ?? 'Unknown').toString();
+
+    final reason = (data['aiReason'] ?? 'No AI analysis available.').toString();
+
+    final recommendedAction =
+        (data['aiRecommendedAction'] ?? 'No recommendation available.')
+            .toString();
+
+    final timeRisk = (data['aiTimeRisk'] ?? 'Unknown').toString();
+
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       showDragHandle: true,
       builder: (context) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
@@ -74,14 +105,103 @@ class AdminDashboardScreen extends StatelessWidget {
                   style: Theme.of(context).textTheme.headlineSmall
                       ?.copyWith(fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 12),
+
+                const SizedBox(height: 10),
+
                 Text(description),
-                const SizedBox(height: 12),
-                Text('Status: ${status.toUpperCase()}'),
-                Text('College ID: $collegeId'),
+
+                const SizedBox(height: 16),
+
+                _InfoRow(label: 'Status', value: status.toUpperCase()),
+
+                _InfoRow(label: 'College ID', value: collegeId),
+
                 if (latitude != null && longitude != null)
-                  Text('Location: $latitude, $longitude'),
+                  _InfoRow(label: 'Location', value: '$latitude, $longitude'),
+
+                const SizedBox(height: 18),
+
+                Text(
+                  'AI Risk Analysis',
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+
                 const SizedBox(height: 12),
+
+                Card(
+                  color: riskColor(riskLevel).withValues(alpha: 0.08),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.psychology_outlined,
+                              color: riskColor(riskLevel),
+                              size: 30,
+                            ),
+
+                            const SizedBox(width: 10),
+
+                            Expanded(
+                              child: Text(
+                                riskLevel.toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: riskColor(riskLevel),
+                                ),
+                              ),
+                            ),
+
+                            if (riskScore != null)
+                              Text(
+                                '${riskScore.toString()}/100',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: riskColor(riskLevel),
+                                ),
+                              ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        _InfoRow(label: 'Category', value: category),
+
+                        _InfoRow(label: 'Severity', value: severity),
+
+                        _InfoRow(label: 'Time Risk', value: timeRisk),
+
+                        const Divider(height: 24),
+
+                        const Text(
+                          'AI Reason',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+
+                        const SizedBox(height: 6),
+
+                        Text(reason),
+
+                        const SizedBox(height: 14),
+
+                        const Text(
+                          'Recommended Action',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+
+                        const SizedBox(height: 6),
+
+                        Text(recommendedAction),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -106,6 +226,8 @@ class AdminDashboardScreen extends StatelessWidget {
         continue;
       }
 
+      final riskLevel = (data['aiRiskLevel'] ?? 'unknown').toString();
+
       markers.add(
         Marker(
           point: LatLng(
@@ -118,7 +240,11 @@ class AdminDashboardScreen extends StatelessWidget {
             onTap: () {
               showReportDetails(context, data);
             },
-            child: const Icon(Icons.location_on, color: Colors.red, size: 46),
+            child: Icon(
+              Icons.location_on,
+              color: riskColor(riskLevel),
+              size: 46,
+            ),
           ),
         ),
       );
@@ -163,11 +289,13 @@ class AdminDashboardScreen extends StatelessWidget {
           ),
         ],
       ),
+
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
             .collection('safety_reports')
             .orderBy('createdAt', descending: true)
             .snapshots(),
+
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(
@@ -191,8 +319,14 @@ class AdminDashboardScreen extends StatelessWidget {
           int newReports = 0;
           int reviewingReports = 0;
           int resolvedReports = 0;
+
           int darkAreas = 0;
           int brokenLights = 0;
+
+          int highRiskReports = 0;
+          int mediumRiskReports = 0;
+          int lowRiskReports = 0;
+          int criticalRiskReports = 0;
 
           for (final report in reports) {
             final data = report.data();
@@ -200,6 +334,8 @@ class AdminDashboardScreen extends StatelessWidget {
             final status = (data['status'] ?? 'new').toString();
 
             final type = (data['reportType'] ?? '').toString();
+
+            final risk = (data['aiRiskLevel'] ?? '').toString().toLowerCase();
 
             if (status == 'new') {
               newReports++;
@@ -215,6 +351,16 @@ class AdminDashboardScreen extends StatelessWidget {
 
             if (type == 'Broken Light') {
               brokenLights++;
+            }
+
+            if (risk == 'critical') {
+              criticalRiskReports++;
+            } else if (risk == 'high') {
+              highRiskReports++;
+            } else if (risk == 'medium') {
+              mediumRiskReports++;
+            } else if (risk == 'low') {
+              lowRiskReports++;
             }
           }
 
@@ -273,6 +419,56 @@ class AdminDashboardScreen extends StatelessWidget {
                 const SizedBox(height: 20),
 
                 Text(
+                  'AI Safety Intelligence',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        _RiskSummary(
+                          title: 'Critical Risk',
+                          value: '$criticalRiskReports',
+                          color: Colors.red.shade900,
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        _RiskSummary(
+                          title: 'High Risk',
+                          value: '$highRiskReports',
+                          color: Colors.red,
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        _RiskSummary(
+                          title: 'Medium Risk',
+                          value: '$mediumRiskReports',
+                          color: Colors.orange,
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        _RiskSummary(
+                          title: 'Low Risk',
+                          value: '$lowRiskReports',
+                          color: Colors.green,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                Text(
                   'Safety Map',
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
@@ -282,6 +478,13 @@ class AdminDashboardScreen extends StatelessWidget {
                 const SizedBox(height: 10),
 
                 buildSafetyMap(context, reports),
+
+                const SizedBox(height: 12),
+
+                const Text(
+                  'Map markers are colored using AI risk level.',
+                  textAlign: TextAlign.center,
+                ),
 
                 const SizedBox(height: 20),
 
@@ -295,11 +498,13 @@ class AdminDashboardScreen extends StatelessWidget {
                           value: '$newReports',
                           color: theme.colorScheme.primary,
                         ),
+
                         _StatusInfo(
                           title: 'Reviewing',
                           value: '$reviewingReports',
                           color: Colors.orange,
                         ),
+
                         _StatusInfo(
                           title: 'Resolved',
                           value: '$resolvedReports',
@@ -320,6 +525,7 @@ class AdminDashboardScreen extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 12),
+
                 if (reports.isEmpty)
                   const Card(
                     child: Padding(
@@ -341,6 +547,11 @@ class AdminDashboardScreen extends StatelessWidget {
                     final collegeId = (data['collegeId'] ?? 'Unknown')
                         .toString();
 
+                    final riskLevel = (data['aiRiskLevel'] ?? 'Not analyzed')
+                        .toString();
+
+                    final riskScore = data['aiRiskScore'];
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       child: Padding(
@@ -357,6 +568,7 @@ class AdminDashboardScreen extends StatelessWidget {
                                         ?.copyWith(fontWeight: FontWeight.bold),
                                   ),
                                 ),
+
                                 Text(
                                   status.toUpperCase(),
                                   style: TextStyle(
@@ -374,6 +586,72 @@ class AdminDashboardScreen extends StatelessWidget {
                             const SizedBox(height: 8),
 
                             Text('College ID: $collegeId'),
+
+                            const SizedBox(height: 12),
+
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: riskColor(riskLevel)
+                                    .withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.psychology_outlined,
+                                    color: riskColor(riskLevel),
+                                  ),
+
+                                  const SizedBox(width: 10),
+
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'AI Risk',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+
+                                        const SizedBox(height: 3),
+
+                                        Text(
+                                          riskLevel.toUpperCase(),
+                                          style: TextStyle(
+                                            color: riskColor(riskLevel),
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+
+                                  if (riskScore != null)
+                                    Text(
+                                      '${riskScore.toString()}/100',
+                                      style: TextStyle(
+                                        color: riskColor(riskLevel),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 18,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(height: 10),
+
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                showReportDetails(context, data);
+                              },
+                              icon: const Icon(Icons.psychology_outlined),
+                              label: const Text('View AI Analysis'),
+                            ),
 
                             const SizedBox(height: 10),
 
@@ -441,16 +719,86 @@ class _StatCard extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: theme.colorScheme.primary),
+
             const SizedBox(height: 8),
+
             Text(
               value,
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
             ),
+
             Text(title),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _RiskSummary extends StatelessWidget {
+  final String title;
+  final String value;
+  final Color color;
+
+  const _RiskSummary({
+    required this.title,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        CircleAvatar(radius: 6, backgroundColor: color),
+
+        const SizedBox(width: 10),
+
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+
+          Expanded(child: Text(value)),
+        ],
       ),
     );
   }
@@ -480,7 +828,9 @@ class _StatusInfo extends StatelessWidget {
               color: color,
             ),
           ),
+
           const SizedBox(height: 4),
+
           Text(title),
         ],
       ),

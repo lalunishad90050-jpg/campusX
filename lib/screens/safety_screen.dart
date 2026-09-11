@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 class SafetyScreen extends StatefulWidget {
@@ -11,6 +14,9 @@ class SafetyScreen extends StatefulWidget {
 }
 
 class _SafetyScreenState extends State<SafetyScreen> {
+  static const String apiUrl =
+      'https://campusx-backend-43jp.onrender.com/safety/analyze';
+
   final _formKey = GlobalKey<FormState>();
   final _descriptionController = TextEditingController();
 
@@ -48,6 +54,34 @@ class _SafetyScreenState extends State<SafetyScreen> {
     }
   }
 
+  Future<Map<String, dynamic>> analyzeSafetyWithAI() async {
+    final response = await http
+        .post(
+          Uri.parse(apiUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'report_type': selectedType,
+            'description': _descriptionController.text.trim(),
+            'latitude': selectedLocation!.latitude,
+            'longitude': selectedLocation!.longitude,
+            'recent_reports': [],
+          }),
+        )
+        .timeout(const Duration(seconds: 45));
+
+    if (response.statusCode != 200) {
+      throw Exception('Safety AI server error: ${response.statusCode}');
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Invalid Safety AI response.');
+    }
+
+    return data;
+  }
+
   Future<void> submitReport() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -80,6 +114,31 @@ class _SafetyScreenState extends State<SafetyScreen> {
       final userData = userDoc.data();
       final collegeId = userData?['collegeId'] ?? 'Unknown';
 
+      // --------------------------------------------------
+      // AI SAFETY ANALYSIS
+      // --------------------------------------------------
+
+      final aiResult = await analyzeSafetyWithAI();
+
+      final riskScore = (aiResult['risk_score'] ?? 0) as num;
+
+      final riskLevel = (aiResult['risk_level'] ?? 'Low').toString();
+
+      final category = (aiResult['category'] ?? selectedType).toString();
+
+      final severity = (aiResult['severity'] ?? 'Low').toString();
+
+      final reason = (aiResult['reason'] ?? '').toString();
+
+      final recommendedAction = (aiResult['recommended_action'] ?? '')
+          .toString();
+
+      final timeRisk = (aiResult['time_risk'] ?? '').toString();
+
+      // --------------------------------------------------
+      // SAVE REPORT + AI ANALYSIS TO FIRESTORE
+      // --------------------------------------------------
+
       await _firestore.collection('safety_reports').add({
         'collegeId': collegeId,
         'userId': user.uid,
@@ -87,9 +146,18 @@ class _SafetyScreenState extends State<SafetyScreen> {
         'description': _descriptionController.text.trim(),
         'status': 'new',
 
-        // Selected campus map location
+        // Location
         'latitude': selectedLocation!.latitude,
         'longitude': selectedLocation!.longitude,
+
+        // AI analysis
+        'aiRiskScore': riskScore.toDouble(),
+        'aiRiskLevel': riskLevel,
+        'aiCategory': category,
+        'aiSeverity': severity,
+        'aiReason': reason,
+        'aiRecommendedAction': recommendedAction,
+        'aiTimeRisk': timeRisk,
 
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -108,8 +176,49 @@ class _SafetyScreenState extends State<SafetyScreen> {
         builder: (context) {
           return AlertDialog(
             title: const Text('Report Submitted ✅'),
-            content: const Text(
-              'Your campus safety report has been submitted successfully.',
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Your campus safety report has been submitted successfully.',
+                  ),
+                  const SizedBox(height: 18),
+
+                  Text(
+                    'AI Risk Score: '
+                    '${riskScore.toStringAsFixed(0)}/100',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  Text(
+                    'Risk Level: $riskLevel',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  Text('Severity: $severity'),
+
+                  if (category.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text('Category: $category'),
+                  ],
+
+                  if (recommendedAction.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Recommended Action',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(recommendedAction),
+                  ],
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -125,11 +234,22 @@ class _SafetyScreenState extends State<SafetyScreen> {
     } on FirebaseException catch (e) {
       if (!mounted) return;
 
-      showMessage('Report save nahi hui: ${e.message ?? 'Unknown error'}');
+      showMessage(
+        'Report save nahi hui: '
+        '${e.message ?? 'Unknown error'}',
+      );
+    } on http.ClientException {
+      if (!mounted) return;
+
+      showMessage('Safety AI se connection nahi ho paaya.');
+    } on FormatException {
+      if (!mounted) return;
+
+      showMessage('Safety AI ne invalid response diya.');
     } catch (e) {
       if (!mounted) return;
 
-      showMessage('Kuch error aa gaya. Please try again.');
+      showMessage('Safety AI analysis failed. Please try again.');
     } finally {
       if (mounted) {
         setState(() {
@@ -248,7 +368,9 @@ class _SafetyScreenState extends State<SafetyScreen> {
                               ? theme.colorScheme.primary
                               : Colors.green,
                         ),
+
                         const SizedBox(height: 10),
+
                         Text(
                           selectedLocation == null
                               ? 'No location selected'
@@ -257,6 +379,7 @@ class _SafetyScreenState extends State<SafetyScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+
                         if (selectedLocation != null) ...[
                           const SizedBox(height: 6),
                           Text(
@@ -265,7 +388,9 @@ class _SafetyScreenState extends State<SafetyScreen> {
                             textAlign: TextAlign.center,
                           ),
                         ],
+
                         const SizedBox(height: 14),
+
                         OutlinedButton.icon(
                           onPressed: isSubmitting ? null : selectLocation,
                           icon: const Icon(Icons.map_outlined),
@@ -325,13 +450,42 @@ class _SafetyScreenState extends State<SafetyScreen> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.send_rounded),
+                      : const Icon(Icons.auto_awesome),
                   label: Text(
-                    isSubmitting ? 'Submitting...' : 'Submit Safety Report',
+                    isSubmitting
+                        ? 'AI Analyzing...'
+                        : 'Submit with AI Analysis',
                   ),
                 ),
 
                 const SizedBox(height: 16),
+
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.auto_awesome,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'CampusShield AI estimates the risk '
+                            'level of your report and provides '
+                            'a recommendation for authorized staff. '
+                            'AI results are estimates, not guarantees.',
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
 
                 Card(
                   child: Padding(
