@@ -1,5 +1,6 @@
 import json
 import os
+from io import BytesIO
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -9,12 +10,15 @@ from pydantic import BaseModel
 
 load_dotenv()
 
+
 app = FastAPI(title="CampusX Backend")
+
 
 api_key = os.getenv("OPENAI_API_KEY")
 
 if not api_key:
     raise RuntimeError("OPENAI_API_KEY is not configured.")
+
 
 client = OpenAI(api_key=api_key)
 
@@ -22,6 +26,7 @@ client = OpenAI(api_key=api_key)
 # ============================================================
 # REQUEST MODELS
 # ============================================================
+
 
 class SkillBridgeRequest(BaseModel):
     resume_text: str
@@ -62,6 +67,7 @@ class TeacherAttendanceAIRequest(BaseModel):
 # BASIC ROUTES
 # ============================================================
 
+
 @app.get("/")
 def root():
     return {
@@ -79,6 +85,7 @@ def health():
 # ============================================================
 # SKILLBRIDGE AI
 # ============================================================
+
 
 @app.post("/skillbridge/analyze")
 def skillbridge_analyze(request: SkillBridgeRequest):
@@ -125,9 +132,7 @@ Return ONLY valid JSON in this exact structure:
 }}
 
 match_percentage must be between 0 and 100.
-
 matched_skills and missing_skills must be arrays of strings.
-
 The roadmap must contain exactly 4 weeks.
 """
 
@@ -158,6 +163,7 @@ The roadmap must contain exactly 4 weeks.
 # EXAMWARRIOR AI
 # ============================================================
 
+
 @app.post("/examwarrior/generate")
 def examwarrior_generate(request: ExamWarriorRequest):
 
@@ -177,14 +183,21 @@ Requirements:
 - The question must be relevant to the subject, unit and topic.
 - Match the requested difficulty.
 - Make it suitable for a B.Tech student.
+- Prefer numerical, conceptual, derivation, or university-exam
+  style questions depending on the topic.
 - Do not provide the answer.
-- Do not add unnecessary explanation.
+- Do not add explanation.
+- Generate exactly ONE question.
 
-Return ONLY valid JSON:
+Return ONLY this JSON object:
 
 {{
     "question": "Your generated question here"
 }}
+
+The "question" field must contain a non-empty string.
+Do not use Markdown code fences.
+Do not add text before or after the JSON.
 """
 
     try:
@@ -193,18 +206,47 @@ Return ONLY valid JSON:
             input=prompt,
         )
 
-        result = json.loads(response.output_text)
+        raw_output = response.output_text.strip()
+
+        # ----------------------------------------------------
+        # Clean accidental Markdown code fences
+        # ----------------------------------------------------
+
+        if raw_output.startswith("```json"):
+            raw_output = raw_output[len("```json"):].strip()
+
+        elif raw_output.startswith("```"):
+            raw_output = raw_output[len("```"):].strip()
+
+        if raw_output.endswith("```"):
+            raw_output = raw_output[:-3].strip()
+
+        # ----------------------------------------------------
+        # Handle accidental extra text around JSON
+        # ----------------------------------------------------
+
+        start = raw_output.find("{")
+        end = raw_output.rfind("}")
+
+        if start != -1 and end != -1 and end > start:
+            raw_output = raw_output[start:end + 1]
+
+        # ----------------------------------------------------
+        # Parse JSON
+        # ----------------------------------------------------
+
+        result = json.loads(raw_output)
 
         question = result.get("question")
 
-        if not question:
+        if not isinstance(question, str) or not question.strip():
             raise HTTPException(
                 status_code=500,
                 detail="AI returned an empty question.",
             )
 
         return {
-            "question": question
+            "question": question.strip()
         }
 
     except json.JSONDecodeError:
@@ -226,6 +268,7 @@ Return ONLY valid JSON:
 # ============================================================
 # COPYCATCHER AI
 # ============================================================
+
 
 @app.post("/copycatcher/analyze")
 async def copycatcher_analyze(
@@ -257,7 +300,6 @@ async def copycatcher_analyze(
 
         if filename.endswith(".pdf"):
 
-            from io import BytesIO
             from pypdf import PdfReader
 
             reader = PdfReader(BytesIO(file_bytes))
@@ -272,7 +314,6 @@ async def copycatcher_analyze(
 
         else:
 
-            from io import BytesIO
             from docx import Document
 
             document = Document(BytesIO(file_bytes))
@@ -388,6 +429,7 @@ Rules:
 # CAMPUSSHIELD AI
 # ============================================================
 
+
 @app.post("/safety/analyze")
 def safety_analyze(request: SafetyAIRequest):
 
@@ -451,16 +493,34 @@ Rules:
         result = json.loads(response.output_text)
 
         return {
-            "risk_score": result.get("risk_score", 0),
-            "risk_level": result.get("risk_level", "Low"),
-            "category": result.get("category", ""),
-            "severity": result.get("severity", "Low"),
-            "reason": result.get("reason", ""),
+            "risk_score": result.get(
+                "risk_score",
+                0,
+            ),
+            "risk_level": result.get(
+                "risk_level",
+                "Low",
+            ),
+            "category": result.get(
+                "category",
+                "",
+            ),
+            "severity": result.get(
+                "severity",
+                "Low",
+            ),
+            "reason": result.get(
+                "reason",
+                "",
+            ),
             "recommended_action": result.get(
                 "recommended_action",
                 "",
             ),
-            "time_risk": result.get("time_risk", ""),
+            "time_risk": result.get(
+                "time_risk",
+                "",
+            ),
         }
 
     except json.JSONDecodeError:
@@ -479,6 +539,7 @@ Rules:
 # ============================================================
 # STUDENT ATTENDANCE AI
 # ============================================================
+
 
 @app.post("/attendance/student-insight")
 def attendance_student_insight(
@@ -595,6 +656,7 @@ Rules:
 # ============================================================
 # TEACHER ATTENDANCE AI
 # ============================================================
+
 
 @app.post("/attendance/teacher-analytics")
 def attendance_teacher_analytics(
