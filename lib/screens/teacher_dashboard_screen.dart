@@ -10,583 +10,536 @@ class TeacherDashboardScreen extends StatefulWidget {
 }
 
 class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final db = FirebaseFirestore.instance;
+  final auth = FirebaseAuth.instance;
 
-  DateTime _selectedDate = DateTime.now();
-  String _selectedSection = 'CSE 1st Year';
+  DateTime selectedDate = DateTime.now();
+  String selectedSection = 'CSE 1st Year';
 
-  final Map<String, String> _attendance = {};
+  bool loading = true;
+  bool saving = false;
 
-  bool _loadingStudents = true;
-  bool _saving = false;
+  List<Map<String, dynamic>> students = [];
+  final Map<String, String> attendance = {};
 
-  List<Map<String, dynamic>> _students = [];
+  final sections = [
+    'CSE 1st Year',
+    'CSE 2nd Year',
+    'CSE 3rd Year',
+    'CSE 4th Year',
+  ];
+
+  String get dateString {
+    final d = selectedDate.day.toString().padLeft(2, '0');
+    final m = selectedDate.month.toString().padLeft(2, '0');
+    return '$d/$m/${selectedDate.year}';
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadStudents();
+    loadStudents();
   }
 
-  String get _selectedDateString {
-    final year = _selectedDate.year.toString().padLeft(4, '0');
-    final month = _selectedDate.month.toString().padLeft(2, '0');
-    final day = _selectedDate.day.toString().padLeft(2, '0');
-
-    return '$year-$month-$day';
-  }
-
-  Future<void> _loadStudents() async {
+  Future<void> loadStudents() async {
     if (!mounted) return;
 
-    setState(() {
-      _loadingStudents = true;
-    });
+    setState(() => loading = true);
 
     try {
-      final snapshot = await _firestore
+      final snap = await db
           .collection('users')
           .where('role', isEqualTo: 'student')
           .get();
 
-      final students = snapshot.docs.map((doc) {
+      final list = snap.docs.map((doc) {
         final data = doc.data();
 
         return {
           'id': doc.id,
-          'collegeId': data['collegeId']?.toString() ?? 'N/A',
-          'email': data['email']?.toString() ?? 'No email',
-          'name':
-              data['name']?.toString() ??
-              data['collegeId']?.toString() ??
-              'Student',
+          'name': (data['name'] ?? 'Student').toString(),
+          'rollNumber': (data['rollNumber'] ?? 'N/A').toString(),
+          'collegeId': (data['collegeId'] ?? 'N/A').toString(),
         };
       }).toList();
 
-      students.sort(
-        (a, b) =>
-            a['collegeId'].toString().compareTo(b['collegeId'].toString()),
-      );
-
       if (!mounted) return;
 
       setState(() {
-        _students = students;
-        _loadingStudents = false;
+        students = list;
+        loading = false;
       });
 
-      await _loadExistingAttendance();
+      await loadExistingAttendance();
     } catch (e) {
       if (!mounted) return;
 
-      setState(() {
-        _loadingStudents = false;
-      });
-
-      _showMessage('Students load nahi ho pa rahe: $e', isError: true);
+      setState(() => loading = false);
+      message('Students load nahi hue: $e', true);
     }
   }
 
-  Future<void> _loadExistingAttendance() async {
-    if (_students.isEmpty) return;
-
+  Future<void> loadExistingAttendance() async {
     try {
-      final snapshot = await _firestore
+      final snap = await db
           .collection('attendance')
-          .where('date', isEqualTo: _selectedDateString)
+          .where('date', isEqualTo: dateString)
           .get();
 
-      final existing = <String, String>{};
+      final Map<String, String> old = {};
 
-      for (final doc in snapshot.docs) {
+      for (final doc in snap.docs) {
         final data = doc.data();
-
-        final userId = data['userId']?.toString();
+        final id = data['userId']?.toString();
         final status = data['status']?.toString();
 
-        if (userId != null && status != null) {
-          existing[userId] = status;
+        if (id != null && (status == 'present' || status == 'absent')) {
+          old[id] = status!;
         }
       }
 
       if (!mounted) return;
 
       setState(() {
-        _attendance
+        attendance
           ..clear()
-          ..addAll(existing);
+          ..addAll(old);
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-
-      _showMessage('Existing attendance load nahi ho payi.', isError: true);
+      message('Attendance load nahi hui: $e', true);
     }
   }
 
-  Future<void> _pickDate() async {
+  Future<void> pickDate() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate,
+      initialDate: selectedDate,
       firstDate: DateTime(2020),
       lastDate: DateTime(2100),
     );
 
-    if (!mounted || picked == null) return;
+    if (picked == null || !mounted) return;
 
     setState(() {
-      _selectedDate = picked;
-      _attendance.clear();
+      selectedDate = picked;
+      attendance.clear();
     });
 
-    await _loadExistingAttendance();
+    await loadExistingAttendance();
   }
 
-  void _setAttendance(String studentId, String status) {
+  void setStatus(String id, String status) {
     setState(() {
-      _attendance[studentId] = status;
+      attendance[id] = status;
     });
   }
 
-  Future<void> _saveAttendance() async {
-    if (_students.isEmpty) {
-      _showMessage('Save karne ke liye students nahi hain.', isError: true);
+  int get presentCount => attendance.values.where((x) => x == 'present').length;
+
+  int get absentCount => attendance.values.where((x) => x == 'absent').length;
+
+  Future<void> saveAttendance() async {
+    if (students.isEmpty) {
+      message('Koi student nahi mila.', true);
       return;
     }
 
-    if (_attendance.length != _students.length) {
-      _showMessage(
-        'Please har student ki Present ya Absent attendance select karo.',
-        isError: true,
-      );
+    final unmarked = students.where((student) {
+      return !attendance.containsKey(student['id'].toString());
+    }).toList();
+
+    if (unmarked.isNotEmpty) {
+      message('Har student ko Present ya Absent mark karo.', true);
       return;
     }
 
-    final teacher = FirebaseAuth.instance.currentUser;
+    final teacher = auth.currentUser;
 
     if (teacher == null) {
-      _showMessage('Teacher login nahi hai.', isError: true);
+      message('Teacher login session nahi mila.', true);
       return;
     }
 
     if (!mounted) return;
 
-    setState(() {
-      _saving = true;
-    });
+    setState(() => saving = true);
 
     try {
-      final batch = _firestore.batch();
+      final batch = db.batch();
 
-      for (final student in _students) {
-        final studentId = student['id'].toString();
-        final status = _attendance[studentId];
+      for (final student in students) {
+        final id = student['id'].toString();
+        final status = attendance[id]!;
 
-        if (status == null) {
-          continue;
-        }
-
-        final query = await _firestore
+        final old = await db
             .collection('attendance')
-            .where('userId', isEqualTo: studentId)
-            .where('date', isEqualTo: _selectedDateString)
+            .where('userId', isEqualTo: id)
+            .where('date', isEqualTo: dateString)
             .limit(1)
             .get();
 
         final data = {
-          'userId': studentId,
-          'collegeId': student['collegeId'],
-          'date': _selectedDateString,
+          'userId': id,
+          'collegeId': student['collegeId'].toString(),
+          'date': dateString,
           'status': status,
           'markedBy': teacher.uid,
           'updatedAt': FieldValue.serverTimestamp(),
         };
 
-        if (query.docs.isEmpty) {
-          final newDoc = _firestore.collection('attendance').doc();
-
-          batch.set(newDoc, {
-            ...data,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+        if (old.docs.isNotEmpty) {
+          batch.update(old.docs.first.reference, data);
         } else {
-          batch.update(query.docs.first.reference, data);
+          final ref = db.collection('attendance').doc();
+
+          batch.set(ref, {...data, 'createdAt': FieldValue.serverTimestamp()});
         }
       }
 
       await batch.commit();
 
       if (!mounted) return;
-
-      _showMessage('Attendance successfully saved for $_selectedDateString.');
+      message('Attendance saved successfully! ✅', false);
     } catch (e) {
       if (!mounted) return;
-
-      _showMessage('Attendance save nahi hui: $e', isError: true);
+      message('Attendance save nahi hui: $e', true);
     } finally {
       if (mounted) {
-        setState(() {
-          _saving = false;
-        });
+        setState(() => saving = false);
       }
     }
   }
 
-  void _showMessage(String message, {bool isError = false}) {
+  void message(String text, bool error) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: isError ? Theme.of(context).colorScheme.error : null,
+        content: Text(text),
+        backgroundColor: error ? Theme.of(context).colorScheme.error : null,
       ),
     );
   }
 
-  Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
+  Future<void> logout() async {
+    await auth.signOut();
 
     if (!mounted) return;
 
     Navigator.pushNamedAndRemoveUntil(context, '/auth', (route) => false);
   }
 
-  String _formatDate(DateTime date) {
-    final day = date.day.toString().padLeft(2, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final year = date.year.toString();
-
-    return '$day/$month/$year';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final presentCount = _attendance.values
-        .where((status) => status == 'present')
-        .length;
-
-    final absentCount = _attendance.values
-        .where((status) => status == 'absent')
-        .length;
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Teacher Dashboard'),
+        title: const Text(
+          'Teacher Dashboard',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         actions: [
           IconButton(
-            tooltip: 'Refresh',
-            onPressed: _loadingStudents ? null : _loadStudents,
+            onPressed: loading ? null : loadStudents,
             icon: const Icon(Icons.refresh),
           ),
-          IconButton(
-            tooltip: 'Logout',
-            onPressed: _logout,
-            icon: const Icon(Icons.logout),
-          ),
+          IconButton(onPressed: logout, icon: const Icon(Icons.logout)),
         ],
       ),
-      body: _loadingStudents
+      body: loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _loadStudents,
+              onRefresh: loadStudents,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(20),
                 children: [
-                  _buildHeader(context),
-                  const SizedBox(height: 16),
-                  _buildControls(context),
-                  const SizedBox(height: 16),
-                  _buildSummary(context, presentCount, absentCount),
-                  const SizedBox(height: 20),
-                  Text(
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(22),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 32,
+                            child: const Icon(Icons.person, size: 34),
+                          ),
+                          const SizedBox(width: 16),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Teacher Attendance Panel',
+                                  style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                SizedBox(height: 5),
+                                Text('Manage student attendance'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        children: [
+                          InkWell(
+                            onTap: pickDate,
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: 'Attendance Date',
+                                prefixIcon: Icon(Icons.calendar_month),
+                              ),
+                              child: Text(dateString),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          DropdownButtonFormField<String>(
+                            initialValue: selectedSection,
+                            decoration: const InputDecoration(
+                              labelText: 'Class / Section',
+                              prefixIcon: Icon(Icons.school),
+                            ),
+                            items: sections.map((section) {
+                              return DropdownMenuItem(
+                                value: section,
+                                child: Text(section),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              if (value == null) return;
+
+                              setState(() {
+                                selectedSection = value;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: summaryCard(
+                          'Present',
+                          presentCount,
+                          Icons.check_circle,
+                          theme,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: summaryCard(
+                          'Absent',
+                          absentCount,
+                          Icons.cancel,
+                          theme,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: summaryCard(
+                          'Total',
+                          students.length,
+                          Icons.groups,
+                          theme,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
                     'Student Attendance',
-                    style: Theme.of(context).textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
-                  if (_students.isEmpty)
-                    _buildEmptyStudents(context)
+                  if (students.isEmpty)
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(25),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.people_outline, size: 55),
+                            const SizedBox(height: 10),
+                            const Text(
+                              'No Students Found',
+                              style: TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Students will appear automatically after registration.',
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
                   else
-                    ..._students.map(
-                      (student) => _buildStudentCard(context, student),
-                    ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _saving ? null : _saveAttendance,
-                    icon: _saving
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_rounded),
-                    label: Text(
-                      _saving ? 'Saving Attendance...' : 'Save Attendance',
+                    ...students.map((student) => studentCard(student, theme)),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      onPressed: saving ? null : saveAttendance,
+                      icon: saving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save),
+                      label: Text(saving ? 'Saving...' : 'Save Attendance'),
                     ),
                   ),
-                  const SizedBox(height: 30),
                 ],
               ),
             ),
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget summaryCard(String title, int count, IconData icon, ThemeData theme) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 30,
-              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-              child: Icon(
-                Icons.person_rounded,
-                size: 32,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Teacher Attendance Panel',
-                    style: Theme.of(context).textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Mark and manage student attendance.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildControls(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Attendance Settings',
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 14),
-            InkWell(
-              onTap: _pickDate,
-              borderRadius: BorderRadius.circular(14),
-              child: InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: 'Attendance Date',
-                  prefixIcon: Icon(Icons.calendar_month),
-                ),
-                child: Text(_formatDate(_selectedDate)),
-              ),
-            ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              initialValue: _selectedSection,
-              decoration: const InputDecoration(
-                labelText: 'Class / Section',
-                prefixIcon: Icon(Icons.school_outlined),
-              ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'CSE 1st Year',
-                  child: Text('CSE 1st Year'),
-                ),
-                DropdownMenuItem(
-                  value: 'CSE 2nd Year',
-                  child: Text('CSE 2nd Year'),
-                ),
-                DropdownMenuItem(
-                  value: 'CSE 3rd Year',
-                  child: Text('CSE 3rd Year'),
-                ),
-                DropdownMenuItem(
-                  value: 'CSE 4th Year',
-                  child: Text('CSE 4th Year'),
-                ),
-              ],
-              onChanged: (value) {
-                if (value == null) return;
-
-                setState(() {
-                  _selectedSection = value;
-                });
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSummary(BuildContext context, int present, int absent) {
-    return Row(
-      children: [
-        Expanded(
-          child: _summaryCard(context, 'Present', present, Icons.check_circle),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: _summaryCard(context, 'Absent', absent, Icons.cancel)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _summaryCard(context, 'Total', _students.length, Icons.people),
-        ),
-      ],
-    );
-  }
-
-  Widget _summaryCard(
-    BuildContext context,
-    String title,
-    int count,
-    IconData icon,
-  ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 16),
         child: Column(
           children: [
-            Icon(icon, size: 25),
+            Icon(icon, color: theme.colorScheme.primary),
             const SizedBox(height: 6),
             Text(
-              count.toString(),
-              style: Theme.of(context).textTheme.titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold),
+              '$count',
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 2),
-            Text(title, style: Theme.of(context).textTheme.bodySmall),
+            Text(title),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStudentCard(BuildContext context, Map<String, dynamic> student) {
-    final studentId = student['id'].toString();
-    final currentStatus = _attendance[studentId];
+  Widget studentCard(Map<String, dynamic> student, ThemeData theme) {
+    final id = student['id'].toString();
+    final name = student['name'].toString();
+    final roll = student['rollNumber'].toString();
+    final collegeId = student['collegeId'].toString();
+    final status = attendance[id];
+
+    final initial = name.trim().isEmpty ? 'S' : name.trim()[0].toUpperCase();
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             Row(
               children: [
                 CircleAvatar(
+                  radius: 28,
                   child: Text(
-                    student['collegeId'].toString().isNotEmpty
-                        ? student['collegeId'].toString()[0].toUpperCase()
-                        : 'S',
+                    initial,
+                    style: const TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        student['name'].toString(),
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                        name,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Roll No: $roll',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: theme.colorScheme.primary,
+                        ),
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'College ID: ${student['collegeId']}',
-                        style: Theme.of(context).textTheme.bodySmall,
+                        'College ID: $collegeId',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
-                  child: _attendanceButton(
-                    context,
-                    studentId,
-                    'Present',
-                    'present',
-                    Icons.check_circle,
-                    currentStatus == 'present',
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      setStatus(id, 'present');
+                    },
+                    icon: Icon(
+                      Icons.check_circle,
+                      color: status == 'present'
+                          ? theme.colorScheme.primary
+                          : null,
+                    ),
+                    label: const Text('Present'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 50),
+                      side: BorderSide(
+                        width: status == 'present' ? 2 : 1,
+                        color: status == 'present'
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.outline,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: _attendanceButton(
-                    context,
-                    studentId,
-                    'Absent',
-                    'absent',
-                    Icons.cancel,
-                    currentStatus == 'absent',
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      setStatus(id, 'absent');
+                    },
+                    icon: Icon(
+                      Icons.cancel,
+                      color: status == 'absent'
+                          ? theme.colorScheme.error
+                          : null,
+                    ),
+                    label: const Text('Absent'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 50),
+                      side: BorderSide(
+                        width: status == 'absent' ? 2 : 1,
+                        color: status == 'absent'
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.outline,
+                      ),
+                    ),
                   ),
                 ),
               ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _attendanceButton(
-    BuildContext context,
-    String studentId,
-    String label,
-    String status,
-    IconData icon,
-    bool selected,
-  ) {
-    return OutlinedButton.icon(
-      onPressed: () {
-        _setAttendance(studentId, status);
-      },
-      icon: Icon(icon),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(double.infinity, 46),
-        side: BorderSide(width: selected ? 2 : 1),
-      ),
-    );
-  }
-
-  Widget _buildEmptyStudents(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(30),
-        child: Column(
-          children: [
-            Icon(
-              Icons.people_outline,
-              size: 60,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'No students found',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Student accounts created in CampusX '
-              'will appear here.',
-              textAlign: TextAlign.center,
             ),
           ],
         ),

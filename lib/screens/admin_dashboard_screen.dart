@@ -1,60 +1,212 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 class AdminDashboardScreen extends StatelessWidget {
   const AdminDashboardScreen({super.key});
 
+  static const LatLng campusCenter = LatLng(26.7439, 83.2212);
+
+  Future<void> updateReportStatus(
+    BuildContext context,
+    String reportId,
+    String status,
+  ) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('safety_reports')
+          .doc(reportId)
+          .update({
+            'status': status,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Report status updated')));
+    } catch (e) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Update failed: $e')));
+    }
+  }
+
+  Color statusColor(String status, BuildContext context) {
+    if (status == 'resolved') {
+      return Colors.green;
+    }
+
+    if (status == 'reviewing') {
+      return Colors.orange;
+    }
+
+    return Theme.of(context).colorScheme.primary;
+  }
+
+  void showReportDetails(BuildContext context, Map<String, dynamic> data) {
+    final type = (data['reportType'] ?? 'Unknown').toString();
+
+    final description = (data['description'] ?? 'No description').toString();
+
+    final status = (data['status'] ?? 'new').toString();
+
+    final collegeId = (data['collegeId'] ?? 'Unknown').toString();
+
+    final latitude = data['latitude'];
+    final longitude = data['longitude'];
+
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  type,
+                  style: Theme.of(context).textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Text(description),
+                const SizedBox(height: 12),
+                Text('Status: ${status.toUpperCase()}'),
+                Text('College ID: $collegeId'),
+                if (latitude != null && longitude != null)
+                  Text('Location: $latitude, $longitude'),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget buildSafetyMap(
+    BuildContext context,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> reports,
+  ) {
+    final markers = <Marker>[];
+
+    for (final report in reports) {
+      final data = report.data();
+
+      final latitude = data['latitude'];
+      final longitude = data['longitude'];
+
+      if (latitude == null || longitude == null) {
+        continue;
+      }
+
+      markers.add(
+        Marker(
+          point: LatLng(
+            (latitude as num).toDouble(),
+            (longitude as num).toDouble(),
+          ),
+          width: 50,
+          height: 50,
+          child: GestureDetector(
+            onTap: () {
+              showReportDetails(context, data);
+            },
+            child: const Icon(Icons.location_on, color: Colors.red, size: 46),
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: 360,
+        child: FlutterMap(
+          options: const MapOptions(
+            initialCenter: campusCenter,
+            initialZoom: 16,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.campusx.app',
+            ),
+            MarkerLayer(markers: markers),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    final reportsStream = FirebaseFirestore.instance
-        .collection('safety_reports')
-        .orderBy('createdAt', descending: true)
-        .snapshots();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin Dashboard'),
         actions: [
           IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.notifications_none_rounded),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Notifications coming soon')),
+              );
+            },
+            icon: const Icon(Icons.notifications_outlined),
           ),
         ],
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: reportsStream,
+        stream: FirebaseFirestore.instance
+            .collection('safety_reports')
+            .orderBy('createdAt', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
           if (snapshot.hasError) {
             return Center(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(20),
                 child: Text(
-                  'Unable to load reports.\n\n${snapshot.error}',
+                  'Reports load nahi ho rahi.\n\n'
+                  '${snapshot.error}',
                   textAlign: TextAlign.center,
                 ),
               ),
             );
           }
 
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
           final reports = snapshot.data?.docs ?? [];
 
           int newReports = 0;
+          int reviewingReports = 0;
+          int resolvedReports = 0;
           int darkAreas = 0;
           int brokenLights = 0;
 
-          for (final doc in reports) {
-            final data = doc.data();
-            final status = data['status']?.toString() ?? '';
-            final type = data['reportType']?.toString() ?? '';
+          for (final report in reports) {
+            final data = report.data();
+
+            final status = (data['status'] ?? 'new').toString();
+
+            final type = (data['reportType'] ?? '').toString();
 
             if (status == 'new') {
               newReports++;
+            } else if (status == 'reviewing') {
+              reviewingReports++;
+            } else if (status == 'resolved') {
+              resolvedReports++;
             }
 
             if (type == 'Dark Area') {
@@ -66,12 +218,10 @@ class AdminDashboardScreen extends StatelessWidget {
             }
           }
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              await Future<void>.delayed(const Duration(milliseconds: 500));
-            },
-            child: ListView(
-              padding: const EdgeInsets.all(20),
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
                   'Campus Safety Overview',
@@ -83,7 +233,7 @@ class AdminDashboardScreen extends StatelessWidget {
                 const SizedBox(height: 6),
 
                 Text(
-                  'Monitor and manage safety reports from students.',
+                  'Monitor and manage campus safety reports.',
                   style: theme.textTheme.bodyMedium,
                 ),
 
@@ -95,80 +245,170 @@ class AdminDashboardScreen extends StatelessWidget {
                   physics: const NeverScrollableScrollPhysics(),
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
-                  childAspectRatio: 1.45,
+                  childAspectRatio: 1.5,
                   children: [
                     _StatCard(
                       title: 'Total Reports',
                       value: '${reports.length}',
-                      icon: Icons.assignment_outlined,
+                      icon: Icons.report_outlined,
                     ),
                     _StatCard(
                       title: 'New Reports',
                       value: '$newReports',
-                      icon: Icons.fiber_new_rounded,
+                      icon: Icons.fiber_new_outlined,
                     ),
                     _StatCard(
                       title: 'Dark Areas',
                       value: '$darkAreas',
-                      icon: Icons.dark_mode_outlined,
+                      icon: Icons.nightlight_outlined,
                     ),
                     _StatCard(
                       title: 'Broken Lights',
                       value: '$brokenLights',
-                      icon: Icons.lightbulb_outline_rounded,
+                      icon: Icons.lightbulb_outline,
                     ),
                   ],
                 ),
 
-                const SizedBox(height: 28),
+                const SizedBox(height: 20),
 
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Recent Reports',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                Text(
+                  'Safety Map',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                buildSafetyMap(context, reports),
+
+                const SizedBox(height: 20),
+
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        _StatusInfo(
+                          title: 'New',
+                          value: '$newReports',
+                          color: theme.colorScheme.primary,
+                        ),
+                        _StatusInfo(
+                          title: 'Reviewing',
+                          value: '$reviewingReports',
+                          color: Colors.orange,
+                        ),
+                        _StatusInfo(
+                          title: 'Resolved',
+                          value: '$resolvedReports',
+                          color: Colors.green,
+                        ),
+                      ],
                     ),
-                    Text(
-                      '${reports.length} total',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                Text(
+                  'Recent Reports',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
 
                 const SizedBox(height: 12),
-
                 if (reports.isEmpty)
-                  Card(
+                  const Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(28),
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.inbox_outlined,
-                            size: 50,
-                            color: theme.colorScheme.primary,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'No safety reports yet.',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Student reports will appear here automatically.',
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
+                      padding: EdgeInsets.all(30),
+                      child: Center(child: Text('No safety reports yet.')),
                     ),
                   )
                 else
-                  ...reports.map((doc) => _ReportCard(report: doc.data())),
+                  ...reports.map((report) {
+                    final data = report.data();
+
+                    final type = (data['reportType'] ?? 'Unknown').toString();
+
+                    final description =
+                        (data['description'] ?? 'No description').toString();
+
+                    final status = (data['status'] ?? 'new').toString();
+
+                    final collegeId = (data['collegeId'] ?? 'Unknown')
+                        .toString();
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    type,
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                Text(
+                                  status.toUpperCase(),
+                                  style: TextStyle(
+                                    color: statusColor(status, context),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 10),
+
+                            Text(description),
+
+                            const SizedBox(height: 8),
+
+                            Text('College ID: $collegeId'),
+
+                            const SizedBox(height: 10),
+
+                            DropdownButtonFormField<String>(
+                              initialValue: status,
+                              decoration: const InputDecoration(
+                                labelText: 'Update Status',
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'new',
+                                  child: Text('New'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'reviewing',
+                                  child: Text('Reviewing'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'resolved',
+                                  child: Text('Resolved'),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) {
+                                  return;
+                                }
+
+                                updateReportStatus(context, report.id, value);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
               ],
             ),
           );
@@ -200,7 +440,7 @@ class _StatCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: theme.colorScheme.primary, size: 26),
+            Icon(icon, color: theme.colorScheme.primary),
             const SizedBox(height: 8),
             Text(
               value,
@@ -208,7 +448,7 @@ class _StatCard extends StatelessWidget {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(title),
           ],
         ),
       ),
@@ -216,127 +456,33 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-class _ReportCard extends StatelessWidget {
-  final Map<String, dynamic> report;
-
-  const _ReportCard({required this.report});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    final collegeId = report['collegeId']?.toString() ?? 'Unknown';
-
-    final reportType = report['reportType']?.toString() ?? 'Unknown';
-
-    final description = report['description']?.toString() ?? 'No description';
-
-    final status = report['status']?.toString() ?? 'unknown';
-
-    final location = report['location']?.toString() ?? 'Not available';
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 14),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: theme.colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.report_problem_outlined,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    reportType,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                _StatusChip(status: status),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            _InfoRow(
-              icon: Icons.badge_outlined,
-              label: 'College ID',
-              value: collegeId,
-            ),
-
-            const SizedBox(height: 8),
-
-            _InfoRow(
-              icon: Icons.location_on_outlined,
-              label: 'Location',
-              value: location,
-            ),
-
-            const SizedBox(height: 12),
-
-            Text(description, style: theme.textTheme.bodyMedium),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
+class _StatusInfo extends StatelessWidget {
+  final String title;
   final String value;
+  final Color color;
 
-  const _InfoRow({
-    required this.icon,
-    required this.label,
+  const _StatusInfo({
+    required this.title,
     required this.value,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 19),
-        const SizedBox(width: 8),
-        Text('$label: ', style: const TextStyle(fontWeight: FontWeight.bold)),
-        Expanded(child: Text(value)),
-      ],
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  final String status;
-
-  const _StatusChip({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        status.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          color: theme.colorScheme.onSecondaryContainer,
-        ),
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(title),
+        ],
       ),
     );
   }
