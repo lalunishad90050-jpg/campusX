@@ -43,12 +43,14 @@ class _AuthScreenState extends State<AuthScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
+    // Student registration
     if (!_isLogin && name.isEmpty) {
       _showMessage('Please enter your name.', isError: true);
       return;
     }
 
-    if (rollNumber.isEmpty) {
+    // Roll number is compulsory only for student registration.
+    if (!_isLogin && rollNumber.isEmpty) {
       _showMessage('Please enter your roll number.', isError: true);
       return;
     }
@@ -105,22 +107,28 @@ class _AuthScreenState extends State<AuthScreen> {
         case 'email-already-in-use':
           message = 'This email is already registered.';
           break;
+
         case 'invalid-email':
           message = 'Please enter a valid email.';
           break;
+
         case 'weak-password':
           message = 'Password is too weak.';
           break;
+
         case 'user-not-found':
           message = 'No account found with this email.';
           break;
+
         case 'wrong-password':
         case 'invalid-credential':
           message = 'Incorrect email or password.';
           break;
+
         case 'too-many-requests':
           message = 'Too many attempts. Try again later.';
           break;
+
         default:
           message = e.message ?? 'Authentication failed.';
       }
@@ -129,7 +137,7 @@ class _AuthScreenState extends State<AuthScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      _showMessage(e.toString(), isError: true);
+      _showMessage(e.toString().replaceFirst('Exception: ', ''), isError: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -179,6 +187,7 @@ class _AuthScreenState extends State<AuthScreen> {
     required String collegeId,
     required String rollNumber,
   }) async {
+    // First authenticate using email + password.
     final credential = await _auth.signInWithEmailAndPassword(
       email: email,
       password: password,
@@ -190,10 +199,12 @@ class _AuthScreenState extends State<AuthScreen> {
       throw Exception('Unable to login.');
     }
 
+    // Get the user's role from Firestore.
     final userDoc = await _firestore.collection('users').doc(user.uid).get();
 
     if (!userDoc.exists) {
       await _auth.signOut();
+
       throw Exception('User profile not found. Please contact admin.');
     }
 
@@ -205,18 +216,31 @@ class _AuthScreenState extends State<AuthScreen> {
 
     final role = (data['role'] ?? 'student').toString().toLowerCase();
 
+    // College ID is compulsory for everyone.
     if (savedCollegeId != collegeId) {
       await _auth.signOut();
+
       throw Exception('College ID does not match.');
     }
 
-    if (savedRollNumber != rollNumber) {
-      await _auth.signOut();
-      throw Exception('Roll number does not match.');
+    // Roll number is required ONLY for students.
+    if (role == 'student') {
+      if (rollNumber.isEmpty) {
+        await _auth.signOut();
+
+        throw Exception('Roll number is required for student login.');
+      }
+
+      if (savedRollNumber != rollNumber) {
+        await _auth.signOut();
+
+        throw Exception('Roll number does not match.');
+      }
     }
 
     if (!mounted) return;
 
+    // Role-based dashboard routing.
     if (role == 'admin') {
       Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
     } else if (role == 'teacher') {
@@ -229,13 +253,15 @@ class _AuthScreenState extends State<AuthScreen> {
   void _showMessage(String message, {required bool isError}) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: isError ? Theme.of(context).colorScheme.error : null,
-      ),
-    );
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: isError ? Theme.of(context).colorScheme.error : null,
+        ),
+      );
   }
 
   @override
@@ -261,7 +287,9 @@ class _AuthScreenState extends State<AuthScreen> {
                       color: theme.colorScheme.primary,
                     ),
                   ),
+
                   const SizedBox(height: 20),
+
                   Text(
                     'CampusX',
                     textAlign: TextAlign.center,
@@ -271,13 +299,17 @@ class _AuthScreenState extends State<AuthScreen> {
                       color: theme.colorScheme.primary,
                     ),
                   ),
+
                   const SizedBox(height: 6),
+
                   Text(
                     _isLogin ? 'Welcome back' : 'Create your student account',
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 17),
                   ),
+
                   const SizedBox(height: 30),
+
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(22),
@@ -291,6 +323,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+
                           const SizedBox(height: 20),
 
                           if (!_isLogin) ...[
@@ -302,19 +335,43 @@ class _AuthScreenState extends State<AuthScreen> {
                                 prefixIcon: Icon(Icons.person),
                               ),
                             ),
+
                             const SizedBox(height: 14),
                           ],
 
-                          TextField(
-                            controller: _rollNumberController,
-                            keyboardType: TextInputType.text,
-                            decoration: const InputDecoration(
-                              labelText: 'Roll Number *',
-                              hintText: 'e.g. 141',
-                              prefixIcon: Icon(Icons.badge),
+                          // Roll Number is shown ONLY on
+                          // student registration.
+                          if (!_isLogin) ...[
+                            TextField(
+                              controller: _rollNumberController,
+                              keyboardType: TextInputType.text,
+                              decoration: const InputDecoration(
+                                labelText: 'Roll Number *',
+                                hintText: 'e.g. 141',
+                                prefixIcon: Icon(Icons.badge),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 14),
+
+                            const SizedBox(height: 14),
+                          ],
+
+                          // On login, we keep the roll number
+                          // field visible because the app does
+                          // not know the user's role until after
+                          // Firebase authentication.
+                          if (_isLogin) ...[
+                            TextField(
+                              controller: _rollNumberController,
+                              keyboardType: TextInputType.text,
+                              decoration: const InputDecoration(
+                                labelText: 'Roll Number (Student only)',
+                                hintText: 'Leave empty for Teacher/Admin',
+                                prefixIcon: Icon(Icons.badge),
+                              ),
+                            ),
+
+                            const SizedBox(height: 14),
+                          ],
 
                           TextField(
                             controller: _collegeIdController,
@@ -325,6 +382,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               prefixIcon: Icon(Icons.school),
                             ),
                           ),
+
                           const SizedBox(height: 14),
 
                           TextField(
@@ -335,6 +393,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               prefixIcon: Icon(Icons.email),
                             ),
                           ),
+
                           const SizedBox(height: 14),
 
                           TextField(
@@ -360,6 +419,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
                           if (!_isLogin) ...[
                             const SizedBox(height: 14),
+
                             TextField(
                               controller: _confirmPasswordController,
                               obscureText: _obscureConfirmPassword,
@@ -410,6 +470,8 @@ class _AuthScreenState extends State<AuthScreen> {
                                 : () {
                                     setState(() {
                                       _isLogin = !_isLogin;
+
+                                      _rollNumberController.clear();
                                     });
                                   },
                             child: Text(
@@ -422,7 +484,9 @@ class _AuthScreenState extends State<AuthScreen> {
                       ),
                     ),
                   ),
+
                   const SizedBox(height: 16),
+
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -436,7 +500,9 @@ class _AuthScreenState extends State<AuthScreen> {
                           const SizedBox(width: 12),
                           const Expanded(
                             child: Text(
-                              'Students can register themselves. Teacher and Admin accounts are managed separately.',
+                              'Students can register themselves. '
+                              'Teacher and Admin accounts are managed separately. '
+                              'Roll Number is required only for students.',
                             ),
                           ),
                         ],
