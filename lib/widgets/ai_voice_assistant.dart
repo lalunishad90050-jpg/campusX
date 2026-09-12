@@ -17,21 +17,22 @@ class AIVoiceAssistant extends StatefulWidget {
 }
 
 class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
-  final stt.SpeechToText _speech = stt.SpeechToText();
   final FlutterTts _tts = FlutterTts();
+  final stt.SpeechToText _speech = stt.SpeechToText();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  static const String _backendUrl =
+      'https://campusx-backend-43jp.onrender.com/assistant/chat';
 
   AIRobotExpression _expression = AIRobotExpression.idle;
 
   bool _speechReady = false;
   bool _listening = false;
   bool _thinking = false;
+  bool _conversationMode = false;
 
-  String _lastQuestion = '';
+  String _currentQuestion = '';
   String _lastReply = '';
-
-  static const String _backendUrl =
-      'https://campusx-backend-43jp.onrender.com/assistant/chat';
 
   @override
   void initState() {
@@ -39,133 +40,150 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     _setupVoice();
   }
 
-  Future<void> _setupVoice() async {
-    try {
-      await _tts.setSpeechRate(0.45);
-      await _tts.setVolume(1.0);
-      await _tts.setPitch(1.05);
-      await _tts.awaitSpeakCompletion(true);
-
-      _speechReady = await _speech.initialize(
-        onStatus: (status) {
-          if (!mounted) return;
-
-          if (status == 'done' || status == 'notListening') {
-            setState(() {
-              _listening = false;
-            });
-          }
-        },
-        onError: (_) {
-          if (!mounted) return;
-
-          setState(() {
-            _listening = false;
-            _expression = AIRobotExpression.error;
-          });
-        },
-      );
-
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (_) {
-      _speechReady = false;
-    }
+  @override
+  void dispose() {
+    _speech.stop();
+    _tts.stop();
+    super.dispose();
   }
 
-  Future<void> _toggleListening() async {
-    if (_thinking) return;
+  Future<void> _setupVoice() async {
+    await _tts.setSpeechRate(0.45);
+    await _tts.setVolume(1.0);
+    await _tts.setPitch(1.05);
+    await _tts.awaitSpeakCompletion(true);
 
+    final available = await _speech.initialize(
+      onStatus: (status) {
+        if (!mounted) return;
+
+        if (status == 'done' || status == 'notListening') {
+          setState(() {
+            _listening = false;
+          });
+
+          if (_conversationMode &&
+              !_thinking &&
+              _currentQuestion.trim().isNotEmpty) {
+            _askAI(_currentQuestion.trim());
+          }
+        }
+      },
+      onError: (error) {
+        if (!mounted) return;
+
+        setState(() {
+          _listening = false;
+          _expression = AIRobotExpression.error;
+        });
+
+        if (_conversationMode) {
+          _showMessage('Voice input error. Please try again.');
+        }
+      },
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _speechReady = available;
+    });
+  }
+
+  Future<void> _startConversation() async {
     if (!_speechReady) {
       await _setupVoice();
     }
 
-    if (!_speechReady) {
-      _showMessage('Microphone available nahi hai.');
+    if (!_speechReady || !mounted) {
+      _showMessage('Voice input is not available.');
       return;
     }
 
-    if (_listening) {
-      await _speech.stop();
+    setState(() {
+      _conversationMode = true;
+      _currentQuestion = '';
+      _expression = AIRobotExpression.idle;
+    });
 
-      if (mounted) {
-        setState(() {
-          _listening = false;
-          _expression = AIRobotExpression.thinking;
-        });
-      }
+    await _startListening();
+  }
 
-      final question = _lastQuestion.trim();
-
-      if (question.isNotEmpty) {
-        await _askAI(question);
-      }
-
+  Future<void> _startListening() async {
+    if (!_speechReady || _listening || _thinking || !_conversationMode) {
       return;
     }
 
-    _lastQuestion = '';
+    if (!mounted) return;
 
-    try {
-      await _speech.listen(
-        onResult: (result) {
-          if (!mounted) return;
+    setState(() {
+      _listening = true;
+      _currentQuestion = '';
+      _expression = AIRobotExpression.thinking;
+    });
 
-          setState(() {
-            _lastQuestion = result.recognizedWords;
-          });
+    await _speech.listen(
+      onResult: (result) {
+        if (!mounted) return;
 
-          if (result.finalResult) {
-            _listening = false;
-
-            final question = _lastQuestion.trim();
-
-            if (question.isNotEmpty) {
-              _askAI(question);
-            }
-          }
-        },
-      );
-
-      if (mounted) {
         setState(() {
-          _listening = true;
-          _expression = AIRobotExpression.thinking;
+          _currentQuestion = result.recognizedWords;
         });
-      }
-    } catch (_) {
-      _showMessage('Voice input start nahi ho paya.');
-    }
+
+        if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
+          _speech.stop();
+        }
+      },
+    );
+  }
+
+  Future<void> _stopConversation() async {
+    _conversationMode = false;
+
+    await _speech.stop();
+    await _tts.stop();
+
+    if (!mounted) return;
+
+    setState(() {
+      _listening = false;
+      _thinking = false;
+      _currentQuestion = '';
+      _expression = AIRobotExpression.idle;
+    });
   }
 
   Future<void> _askAI(String question) async {
-    if (question.isEmpty || _thinking) return;
-
-    if (mounted) {
-      setState(() {
-        _thinking = true;
-        _expression = AIRobotExpression.thinking;
-      });
+    if (!_conversationMode || question.trim().isEmpty) {
+      return;
     }
 
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      await _speak('Please login first.', language: 'en-IN');
+      return;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _thinking = true;
+      _listening = false;
+      _expression = AIRobotExpression.thinking;
+    });
+
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
 
-      if (user == null) {
-        await _speakReply('Please login to continue.', 'en-IN');
-        return;
-      }
+      final userData = userDoc.data() ?? {};
+      final role = (userData['role'] ?? 'student').toString().toLowerCase();
 
-      final userSnapshot = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      final userData = userSnapshot.data() ?? {};
-      final role = (userData['role'] ?? 'student').toString();
-
-      final contextData = await _buildContext(uid: user.uid, role: role);
+      final context = await _buildContext(
+        uid: user.uid,
+        role: role,
+        userData: userData,
+      );
 
       final response = await http
           .post(
@@ -174,54 +192,94 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
             body: jsonEncode({
               'role': role,
               'question': question,
-              'context': contextData,
+              'context': context,
             }),
           )
           .timeout(const Duration(seconds: 40));
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception('AI server error');
+        throw Exception('AI server returned ${response.statusCode}');
       }
 
       final decoded = jsonDecode(response.body);
 
-      final reply = (decoded['reply'] ?? '').toString();
-      final language = (decoded['language'] ?? 'en').toString();
+      final reply = (decoded['reply'] ?? '').toString().trim();
+
+      final language = (decoded['language'] ?? 'en').toString().toLowerCase();
 
       if (reply.isEmpty) {
-        throw Exception('Empty AI reply');
+        throw Exception('Empty AI response');
       }
 
-      if (mounted) {
-        setState(() {
-          _lastReply = reply;
-        });
-      }
+      if (!mounted) return;
 
-      await _speakReply(reply, language == 'hi' ? 'hi-IN' : 'en-IN');
-    } catch (_) {
-      await _speakReply(
-        'Sorry, I could not connect to CampusX AI right now.',
-        'en-IN',
+      setState(() {
+        _lastReply = reply;
+        _thinking = false;
+        _expression = AIRobotExpression.speaking;
+      });
+
+      await _speak(reply, language: language == 'hi' ? 'hi-IN' : 'en-IN');
+
+      if (!mounted || !_conversationMode) return;
+
+      setState(() {
+        _expression = AIRobotExpression.idle;
+        _currentQuestion = '';
+      });
+
+      // Automatically listen for the next question.
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      if (mounted && _conversationMode) {
+        await _startListening();
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _thinking = false;
+        _expression = AIRobotExpression.error;
+      });
+
+      await _speak(
+        'Sorry, I could not process that right now.',
+        language: 'en-IN',
       );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _thinking = false;
-          _expression = AIRobotExpression.idle;
-        });
+
+      if (!mounted || !_conversationMode) return;
+
+      setState(() {
+        _expression = AIRobotExpression.idle;
+        _currentQuestion = '';
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+
+      if (mounted && _conversationMode) {
+        await _startListening();
       }
     }
+  }
+
+  Future<void> _speak(String text, {required String language}) async {
+    await _tts.setLanguage(language);
+    await _tts.speak(text);
   }
 
   Future<Map<String, dynamic>> _buildContext({
     required String uid,
     required String role,
+    required Map<String, dynamic> userData,
   }) async {
-    final result = <String, dynamic>{'role': role};
+    final context = <String, dynamic>{
+      'name': userData['name'] ?? '',
+      'email': userData['email'] ?? '',
+      'role': role,
+    };
 
     if (role == 'student') {
-      final attendance = await _firestore
+      final snapshot = await _firestore
           .collection('attendance')
           .where('userId', isEqualTo: uid)
           .get();
@@ -229,8 +287,9 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       int present = 0;
       int absent = 0;
 
-      for (final doc in attendance.docs) {
-        final status = doc.data()['status'];
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final status = data['status'];
 
         if (status == 'present') {
           present++;
@@ -241,7 +300,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
       final total = present + absent;
 
-      result['attendance'] = {
+      context['attendance'] = {
         'present': present,
         'absent': absent,
         'total': total,
@@ -250,13 +309,14 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     }
 
     if (role == 'teacher') {
-      final attendance = await _firestore.collection('attendance').get();
+      final snapshot = await _firestore.collection('attendance').get();
 
       int present = 0;
       int absent = 0;
 
-      for (final doc in attendance.docs) {
-        final status = doc.data()['status'];
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final status = data['status'];
 
         if (status == 'present') {
           present++;
@@ -265,20 +325,22 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         }
       }
 
-      result['attendance'] = {
+      context['attendance'] = {
         'presentRecords': present,
         'absentRecords': absent,
+        'totalRecords': present + absent,
       };
     }
 
     if (role == 'admin') {
-      final reports = await _firestore.collection('safety_reports').get();
+      final snapshot = await _firestore.collection('safety_reports').get();
 
       int open = 0;
       int resolved = 0;
 
-      for (final doc in reports.docs) {
-        final status = doc.data()['status'];
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final status = (data['status'] ?? 'new').toString().toLowerCase();
 
         if (status == 'resolved') {
           resolved++;
@@ -287,28 +349,14 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         }
       }
 
-      result['safety'] = {
-        'totalReports': reports.docs.length,
-        'openReports': open,
-        'resolvedReports': resolved,
+      context['safetyReports'] = {
+        'total': snapshot.docs.length,
+        'open': open,
+        'resolved': resolved,
       };
     }
 
-    return result;
-  }
-
-  Future<void> _speakReply(String text, String language) async {
-    if (!mounted) return;
-
-    setState(() {
-      _expression = AIRobotExpression.speaking;
-    });
-
-    try {
-      await _tts.stop();
-      await _tts.setLanguage(language);
-      await _tts.speak(text);
-    } catch (_) {}
+    return context;
   }
 
   void _showMessage(String message) {
@@ -316,97 +364,138 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  @override
-  void dispose() {
-    _speech.stop();
-    _tts.stop();
-    super.dispose();
+      ..showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        if (_lastQuestion.isNotEmpty || _lastReply.isNotEmpty)
-          Container(
-            constraints: const BoxConstraints(maxWidth: 270),
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(13),
-            decoration: BoxDecoration(
-              color: const Color(0xFF11172A).withValues(alpha: 0.96),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: const Color(0xFF6366F1).withValues(alpha: 0.35),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  blurRadius: 22,
-                  color: Colors.black.withValues(alpha: 0.35),
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (_lastReply.isNotEmpty || _currentQuestion.isNotEmpty)
+            Container(
+              constraints: const BoxConstraints(maxWidth: 280),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface.withValues(alpha: 0.96),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.35),
                 ),
-              ],
-            ),
-            child: Text(
-              _lastReply.isNotEmpty ? _lastReply : _lastQuestion,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-                height: 1.35,
+                boxShadow: [
+                  BoxShadow(
+                    blurRadius: 18,
+                    spreadRadius: 1,
+                    color: Colors.black.withValues(alpha: 0.25),
+                  ),
+                ],
               ),
-            ),
-          ),
-        GestureDetector(
-          onTap: _toggleListening,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: 92,
-                height: 92,
-                child: AIRobot(expression: _expression, size: 86),
-              ),
-              if (_listening)
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEF4444),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: const Color(0xFF070B1A),
-                        width: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_currentQuestion.isNotEmpty) ...[
+                    Text(
+                      'You',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                    child: const Icon(
-                      Icons.mic_rounded,
-                      size: 18,
-                      color: Colors.white,
+                    const SizedBox(height: 4),
+                    Text(_currentQuestion),
+                  ],
+                  if (_lastReply.isNotEmpty && _currentQuestion.isNotEmpty)
+                    const SizedBox(height: 10),
+                  if (_lastReply.isNotEmpty) ...[
+                    Text(
+                      'CampusX AI',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _lastReply,
+                      maxLines: 5,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              AIRobot(expression: _expression, size: 82),
+              const SizedBox(width: 8),
+
+              GestureDetector(
+                onTap: () async {
+                  if (_conversationMode) {
+                    await _stopConversation();
+                  } else {
+                    await _startConversation();
+                  }
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  height: 58,
+                  width: 58,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _conversationMode
+                        ? Colors.redAccent
+                        : theme.colorScheme.primary,
+                    boxShadow: [
+                      BoxShadow(
+                        blurRadius: _conversationMode ? 22 : 14,
+                        spreadRadius: 2,
+                        color:
+                            (_conversationMode
+                                    ? Colors.redAccent
+                                    : theme.colorScheme.primary)
+                                .withValues(alpha: 0.35),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    _conversationMode ? Icons.stop_rounded : Icons.mic_rounded,
+                    color: Colors.white,
+                    size: 28,
                   ),
                 ),
+              ),
             ],
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          _listening
-              ? 'Listening...'
-              : _thinking
-              ? 'Thinking...'
-              : 'Ask CampusX',
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: Colors.white70,
+
+          const SizedBox(height: 5),
+
+          Text(
+            _conversationMode
+                ? (_listening
+                      ? 'Listening...'
+                      : _thinking
+                      ? 'Thinking...'
+                      : 'Talking with CampusX')
+                : 'Ask CampusX',
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.75),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
