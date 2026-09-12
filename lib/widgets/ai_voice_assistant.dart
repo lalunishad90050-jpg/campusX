@@ -65,19 +65,23 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     _voiceInitializing = true;
 
     try {
-      await _tts.setSpeechRate(0.45);
+      await _tts.setSpeechRate(0.48);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.05);
       await _tts.awaitSpeakCompletion(true);
+
+      await _tts.setLanguage('en-IN');
 
       final available = await _speech.initialize(
         onStatus: (status) {
           if (!mounted) return;
 
           if (status == 'done' || status == 'notListening') {
-            setState(() {
-              _listening = false;
-            });
+            if (_listening) {
+              setState(() {
+                _listening = false;
+              });
+            }
           }
         },
         onError: (error) {
@@ -127,7 +131,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
     if (!_speechReady) {
       _showMessage(
-        'Voice input is not available. Please check microphone permission.',
+        'Microphone available nahi hai. Please microphone permission check karo.',
       );
       return;
     }
@@ -168,9 +172,11 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
     try {
       await _speech.listen(
-        listenFor: const Duration(seconds: 15),
-        pauseFor: const Duration(seconds: 3),
+        localeId: 'en_IN',
+        listenFor: const Duration(seconds: 12),
+        pauseFor: const Duration(seconds: 2),
         partialResults: true,
+        cancelOnError: true,
         onResult: (result) {
           if (!mounted) return;
 
@@ -180,11 +186,15 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
           final words = result.recognizedWords.trim();
 
+          if (words.isEmpty) {
+            return;
+          }
+
           setState(() {
             _currentQuestion = words;
           });
 
-          if (result.finalResult && words.isNotEmpty) {
+          if (result.finalResult) {
             _finishListening(session, words);
           }
         },
@@ -199,7 +209,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _expression = AIRobotExpression.error;
       });
 
-      _showMessage('Could not start microphone.');
+      _showMessage('Microphone start nahi ho paya.');
     }
   }
 
@@ -274,26 +284,19 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     final cleanQuestion = question.trim();
 
     if (cleanQuestion.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _processingQuestion = false;
-          _thinking = false;
-          _expression = AIRobotExpression.idle;
-        });
-      }
-
+      _resetAfterQuestion();
       return;
     }
 
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      if (mounted) {
-        setState(() {
-          _processingQuestion = false;
-          _thinking = false;
-        });
-      }
+      if (!mounted) return;
+
+      setState(() {
+        _processingQuestion = false;
+        _thinking = false;
+      });
 
       await _speak('Please login first.', language: 'en-IN');
 
@@ -309,7 +312,10 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
       final userData = userDoc.data() ?? {};
 
-      final role = (userData['role'] ?? 'student').toString().toLowerCase();
+      final role = (userData['role'] ?? 'student')
+          .toString()
+          .trim()
+          .toLowerCase();
 
       final context = await _buildContext(
         uid: user.uid,
@@ -331,7 +337,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
               'context': context,
             }),
           )
-          .timeout(const Duration(seconds: 40));
+          .timeout(const Duration(seconds: 20));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -345,8 +351,6 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
       final reply = (decoded['reply'] ?? '').toString().trim();
 
-      final language = (decoded['language'] ?? 'en').toString().toLowerCase();
-
       if (reply.isEmpty) {
         throw Exception('Empty AI response');
       }
@@ -355,13 +359,17 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         return;
       }
 
+      final language = _detectLanguage(reply);
+
       setState(() {
         _lastReply = reply;
         _thinking = false;
+        _processingQuestion = true;
         _expression = AIRobotExpression.speaking;
       });
 
-      await _speak(reply, language: language == 'hi' ? 'hi-IN' : 'en-IN');
+      // AI reply ko turant voice me bolna.
+      await _speak(reply, language: language);
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -379,7 +387,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _expression = AIRobotExpression.idle;
       });
 
-      await Future<void>.delayed(const Duration(milliseconds: 250));
+      // Very small gap, then listen again.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -418,7 +427,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _currentQuestion = '';
       });
 
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -430,10 +439,25 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     }
   }
 
+  String _detectLanguage(String text) {
+    final hasHindi = text
+        .split('')
+        .any(
+          (char) =>
+              char.codeUnitAt(0) >= 0x0900 && char.codeUnitAt(0) <= 0x097F,
+        );
+
+    return hasHindi ? 'hi-IN' : 'en-IN';
+  }
+
   Future<void> _speak(String text, {required String language}) async {
     try {
       await _tts.stop();
+
       await _tts.setLanguage(language);
+      await _tts.setSpeechRate(0.48);
+      await _tts.setVolume(1.0);
+      await _tts.setPitch(1.05);
 
       if (!mounted) return;
 
@@ -447,6 +471,17 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     }
   }
 
+  void _resetAfterQuestion() {
+    if (!mounted) return;
+
+    setState(() {
+      _processingQuestion = false;
+      _thinking = false;
+      _listening = false;
+      _expression = AIRobotExpression.idle;
+    });
+  }
+
   Future<Map<String, dynamic>> _buildContext({
     required String uid,
     required String role,
@@ -458,6 +493,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       'role': role,
     };
 
+    // STUDENT CONTEXT
     if (role == 'student') {
       final snapshot = await _firestore
           .collection('attendance')
@@ -488,6 +524,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       };
     }
 
+    // TEACHER CONTEXT
     if (role == 'teacher') {
       final snapshot = await _firestore.collection('attendance').get();
 
@@ -512,6 +549,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       };
     }
 
+    // ADMIN CONTEXT
     if (role == 'admin') {
       final snapshot = await _firestore.collection('safety_reports').get();
 
@@ -553,157 +591,174 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final screenSize = MediaQuery.of(context).size;
+
+    final maxAssistantWidth = screenSize.width > 420
+        ? 390.0
+        : screenSize.width - 16;
 
     final showBubble = _lastReply.isNotEmpty || _currentQuestion.isNotEmpty;
 
     return Material(
       color: Colors.transparent,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width - 16,
-          maxHeight: MediaQuery.of(context).size.height - 24,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (showBubble)
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width - 24,
-                  maxHeight: 150,
-                ),
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface.withValues(alpha: 0.96),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.35),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        blurRadius: 18,
-                        spreadRadius: 1,
-                        color: Colors.black.withValues(alpha: 0.25),
-                      ),
-                    ],
-                  ),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (_currentQuestion.isNotEmpty) ...[
-                          Text(
-                            'You',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            _currentQuestion,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                        if (_lastReply.isNotEmpty &&
-                            _currentQuestion.isNotEmpty)
-                          const SizedBox(height: 8),
-                        if (_lastReply.isNotEmpty) ...[
-                          Text(
-                            'CampusX AI',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            _lastReply,
-                            maxLines: 5,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-            Row(
+      child: SafeArea(
+        child: Align(
+          alignment: Alignment.bottomRight,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: maxAssistantWidth,
+              maxHeight: screenSize.height * 0.55,
+            ),
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                // Smaller robot keeps the complete assistant
-                // safely inside narrow screens.
-                AIRobot(expression: _expression, size: 72),
-
-                const SizedBox(width: 6),
-
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () async {
-                    if (_conversationMode) {
-                      await _stopConversation();
-                    } else {
-                      await _startConversation();
-                    }
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    height: 54,
-                    width: 54,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _conversationMode
-                          ? Colors.redAccent
-                          : theme.colorScheme.primary,
-                      boxShadow: [
-                        BoxShadow(
-                          blurRadius: _conversationMode ? 20 : 12,
-                          spreadRadius: 2,
-                          color:
-                              (_conversationMode
-                                      ? Colors.redAccent
-                                      : theme.colorScheme.primary)
-                                  .withValues(alpha: 0.35),
-                        ),
-                      ],
+                if (showBubble)
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: maxAssistantWidth - 8,
+                      maxHeight: 190,
                     ),
-                    child: Icon(
-                      _conversationMode
-                          ? Icons.stop_rounded
-                          : Icons.mic_rounded,
-                      color: Colors.white,
-                      size: 26,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8, right: 4),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface.withValues(
+                          alpha: 0.97,
+                        ),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.35,
+                          ),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: 18,
+                            spreadRadius: 1,
+                            color: Colors.black.withValues(alpha: 0.25),
+                          ),
+                        ],
+                      ),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_currentQuestion.isNotEmpty) ...[
+                              Text(
+                                'You',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                _currentQuestion,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                            if (_lastReply.isNotEmpty &&
+                                _currentQuestion.isNotEmpty)
+                              const SizedBox(height: 8),
+                            if (_lastReply.isNotEmpty) ...[
+                              Text(
+                                'CampusX AI',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                _lastReply,
+                                maxLines: 7,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    AIRobot(expression: _expression, size: 70),
+
+                    const SizedBox(width: 6),
+
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () async {
+                        if (_conversationMode) {
+                          await _stopConversation();
+                        } else {
+                          await _startConversation();
+                        }
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        height: 54,
+                        width: 54,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _conversationMode
+                              ? Colors.redAccent
+                              : theme.colorScheme.primary,
+                          boxShadow: [
+                            BoxShadow(
+                              blurRadius: _conversationMode ? 20 : 12,
+                              spreadRadius: 2,
+                              color:
+                                  (_conversationMode
+                                          ? Colors.redAccent
+                                          : theme.colorScheme.primary)
+                                      .withValues(alpha: 0.35),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          _conversationMode
+                              ? Icons.stop_rounded
+                              : Icons.mic_rounded,
+                          color: Colors.white,
+                          size: 26,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 3),
+
+                Padding(
+                  padding: const EdgeInsets.only(right: 2),
+                  child: Text(
+                    _conversationMode
+                        ? (_listening
+                              ? 'Listening...'
+                              : _thinking
+                              ? 'Thinking...'
+                              : 'Talking with CampusX')
+                        : 'Ask CampusX',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: 0.75,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
-
-            const SizedBox(height: 3),
-
-            Text(
-              _conversationMode
-                  ? (_listening
-                        ? 'Listening...'
-                        : _thinking
-                        ? 'Thinking...'
-                        : 'Talking with CampusX')
-                  : 'Ask CampusX',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.75),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
