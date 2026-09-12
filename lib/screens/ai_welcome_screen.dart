@@ -17,15 +17,13 @@ class _AIWelcomeScreenState extends State<AIWelcomeScreen> {
 
   bool _speaking = false;
   bool _started = false;
+  bool _skipped = false;
 
   @override
   void initState() {
     super.initState();
 
-    _setupVoice();
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
       _startWelcome();
     });
   }
@@ -34,81 +32,157 @@ class _AIWelcomeScreenState extends State<AIWelcomeScreen> {
     await _tts.setSpeechRate(0.45);
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.05);
-  }
 
-  Future<void> _startWelcome() async {
-    if (_started) return;
+    // IMPORTANT:
+    // Wait for every sentence to finish before continuing.
+    await _tts.awaitSpeakCompletion(true);
 
-    _started = true;
+    _tts.setStartHandler(() {
+      if (!mounted) return;
 
-    // English — only once.
-    await _speakEnglish();
-
-    if (!mounted) return;
-
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    if (!mounted) return;
-
-    // Hindi — only once.
-    await _speakHindi();
-
-    if (!mounted) return;
-
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    if (!mounted) return;
-
-    Navigator.pushReplacementNamed(context, '/auth');
-  }
-
-  Future<void> _speakEnglish() async {
-    await _speak(
-      'Welcome to CampusX. '
-          'Your smart campus assistant is ready.',
-      'en-IN',
-    );
-  }
-
-  Future<void> _speakHindi() async {
-    await _speak(
-      'CampusX mein aapka swagat hai. '
-          'Aapka smart campus assistant taiyaar hai.',
-      'hi-IN',
-    );
-  }
-
-  Future<void> _speak(String text, String language) async {
-    if (_speaking) {
-      await _tts.stop();
-    }
-
-    if (mounted) {
       setState(() {
         _speaking = true;
         _expression = AIRobotExpression.speaking;
       });
-    }
+    });
 
-    try {
-      await _tts.setLanguage(language);
-      await _tts.speak(text);
+    _tts.setCompletionHandler(() {
+      if (!mounted) return;
 
-      // Wait until TTS finishes before changing expression.
-      await Future.delayed(const Duration(milliseconds: 100));
-    } catch (_) {
-      // Continue even if TTS is unavailable.
-    }
+      setState(() {
+        _speaking = false;
+        _expression = AIRobotExpression.happy;
+      });
+    });
 
-    if (!mounted) return;
+    _tts.setCancelHandler(() {
+      if (!mounted) return;
 
-    setState(() {
-      _speaking = false;
-      _expression = AIRobotExpression.happy;
+      setState(() {
+        _speaking = false;
+        _expression = AIRobotExpression.happy;
+      });
+    });
+
+    _tts.setErrorHandler((message) {
+      if (!mounted) return;
+
+      setState(() {
+        _speaking = false;
+        _expression = AIRobotExpression.error;
+      });
     });
   }
 
+  Future<void> _startWelcome() async {
+    if (_started || _skipped) return;
+
+    _started = true;
+
+    try {
+      // Give Android TTS a moment after Activity startup.
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted || _skipped) return;
+
+      // IMPORTANT: setup must finish BEFORE speaking.
+      await _setupVoice();
+
+      if (!mounted || _skipped) return;
+
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      if (!mounted || _skipped) return;
+
+      // English
+      await _speak(
+        'Welcome to CampusX. '
+            'Your smart campus assistant is ready.',
+        'en-IN',
+      );
+
+      if (!mounted || _skipped) return;
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted || _skipped) return;
+
+      // Hindi
+      await _speak(
+        'CampusX mein aapka swagat hai. '
+            'Aapka smart campus assistant taiyaar hai.',
+        'hi-IN',
+      );
+
+      if (!mounted || _skipped) return;
+
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      if (!mounted || _skipped) return;
+
+      setState(() {
+        _expression = AIRobotExpression.happy;
+      });
+
+      Navigator.pushReplacementNamed(context, '/auth');
+    } catch (_) {
+      // If TTS is unavailable, still allow the user to continue.
+      if (!mounted || _skipped) return;
+
+      setState(() {
+        _speaking = false;
+        _expression = AIRobotExpression.error;
+      });
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted || _skipped) return;
+
+      Navigator.pushReplacementNamed(context, '/auth');
+    }
+  }
+
+  Future<void> _speak(String text, String language) async {
+    if (_skipped) return;
+
+    try {
+      // Stop anything already playing.
+      await _tts.stop();
+
+      if (!mounted || _skipped) return;
+
+      await _tts.setLanguage(language);
+
+      if (!mounted || _skipped) return;
+
+      setState(() {
+        _speaking = true;
+        _expression = AIRobotExpression.speaking;
+      });
+
+      // Because awaitSpeakCompletion(true) is enabled,
+      // this waits until the complete sentence finishes.
+      await _tts.speak(text);
+
+      if (!mounted || _skipped) return;
+
+      setState(() {
+        _speaking = false;
+        _expression = AIRobotExpression.happy;
+      });
+    } catch (_) {
+      if (!mounted || _skipped) return;
+
+      setState(() {
+        _speaking = false;
+        _expression = AIRobotExpression.error;
+      });
+    }
+  }
+
   Future<void> _skipWelcome() async {
+    _skipped = true;
+
     await _tts.stop();
 
     if (!mounted) return;
@@ -118,6 +192,7 @@ class _AIWelcomeScreenState extends State<AIWelcomeScreen> {
 
   @override
   void dispose() {
+    _skipped = true;
     _tts.stop();
     super.dispose();
   }
@@ -140,7 +215,7 @@ class _AIWelcomeScreenState extends State<AIWelcomeScreen> {
         ),
         child: SafeArea(
           child: Center(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -189,7 +264,7 @@ class _AIWelcomeScreenState extends State<AIWelcomeScreen> {
                   const SizedBox(height: 30),
 
                   TextButton(
-                    onPressed: _speaking ? null : _skipWelcome,
+                    onPressed: _skipped ? null : _skipWelcome,
                     child: const Text('Skip'),
                   ),
                 ],

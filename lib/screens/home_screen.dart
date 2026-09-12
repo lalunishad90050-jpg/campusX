@@ -51,7 +51,7 @@ class HomeScreen extends StatelessWidget {
           child: Stack(
             children: [
               SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(18, 82, 18, 125),
+                padding: const EdgeInsets.fromLTRB(18, 82, 18, 150),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -96,6 +96,7 @@ class HomeScreen extends StatelessWidget {
                                   ),
                                 ),
                                 child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
                                       Icons.circle,
@@ -117,7 +118,9 @@ class HomeScreen extends StatelessWidget {
                               ),
                             ],
                           ),
+
                           const SizedBox(height: 24),
+
                           Text(
                             'Welcome to CampusX 👋',
                             style: theme.textTheme.headlineSmall?.copyWith(
@@ -125,26 +128,30 @@ class HomeScreen extends StatelessWidget {
                               letterSpacing: -0.5,
                             ),
                           ),
+
                           const SizedBox(height: 7),
+
                           Text(
                             'Your intelligent campus companion',
                             style: theme.textTheme.bodyLarge?.copyWith(
                               color: Colors.white.withValues(alpha: 0.60),
                             ),
                           ),
+
                           const SizedBox(height: 20),
+
                           Row(
-                            children: [
+                            children: const [
                               _MiniStatus(
                                 icon: Icons.security_rounded,
                                 text: 'Safety',
                               ),
-                              const SizedBox(width: 8),
+                              SizedBox(width: 8),
                               _MiniStatus(
                                 icon: Icons.school_rounded,
                                 text: 'Learning',
                               ),
-                              const SizedBox(width: 8),
+                              SizedBox(width: 8),
                               _MiniStatus(
                                 icon: Icons.work_outline_rounded,
                                 text: 'Career',
@@ -188,7 +195,9 @@ class HomeScreen extends StatelessWidget {
                                 size: 31,
                               ),
                             ),
+
                             const SizedBox(width: 15),
+
                             const Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -211,6 +220,9 @@ class HomeScreen extends StatelessWidget {
                                 ],
                               ),
                             ),
+
+                            const SizedBox(width: 8),
+
                             const Icon(
                               Icons.arrow_forward_ios_rounded,
                               size: 16,
@@ -242,51 +254,60 @@ class HomeScreen extends StatelessWidget {
 
                     const SizedBox(height: 15),
 
-                    GridView.count(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 0.98,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      children: [
-                        FeatureCard(
-                          icon: Icons.fingerprint_rounded,
-                          title: 'Attendance',
-                          subtitle: 'Track attendance',
-                          iconColor: const Color(0xFF22D3EE),
-                          onTap: () {
-                            openScreen(context, const AttendanceScreen());
-                          },
-                        ),
-                        FeatureCard(
-                          icon: Icons.menu_book_rounded,
-                          title: 'ExamWarrior',
-                          subtitle: 'PYQs & practice',
-                          iconColor: const Color(0xFFA78BFA),
-                          onTap: () {
-                            openScreen(context, const ExamWarriorScreen());
-                          },
-                        ),
-                        FeatureCard(
-                          icon: Icons.work_outline_rounded,
-                          title: 'SkillBridge',
-                          subtitle: 'Skills & careers',
-                          iconColor: const Color(0xFF34D399),
-                          onTap: () {
-                            openScreen(context, const SkillBridgeScreen());
-                          },
-                        ),
-                        FeatureCard(
-                          icon: Icons.content_copy_rounded,
-                          title: 'CopyCatcher',
-                          subtitle: 'Originality check',
-                          iconColor: const Color(0xFFF59E0B),
-                          onTap: () {
-                            openScreen(context, const CopyCatcherScreen());
-                          },
-                        ),
-                      ],
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final cardWidth = (constraints.maxWidth - 12) / 2;
+
+                        return GridView.count(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: cardWidth / 205,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          children: [
+                            FeatureCard(
+                              icon: Icons.fingerprint_rounded,
+                              title: 'Attendance',
+                              subtitle: 'Track attendance',
+                              iconColor: const Color(0xFF22D3EE),
+                              onTap: () {
+                                openScreen(context, const AttendanceScreen());
+                              },
+                            ),
+
+                            FeatureCard(
+                              icon: Icons.menu_book_rounded,
+                              title: 'ExamWarrior',
+                              subtitle: 'PYQs & practice',
+                              iconColor: const Color(0xFFA78BFA),
+                              onTap: () {
+                                openScreen(context, const ExamWarriorScreen());
+                              },
+                            ),
+
+                            FeatureCard(
+                              icon: Icons.work_outline_rounded,
+                              title: 'SkillBridge',
+                              subtitle: 'Skills & careers',
+                              iconColor: const Color(0xFF34D399),
+                              onTap: () {
+                                openScreen(context, const SkillBridgeScreen());
+                              },
+                            ),
+
+                            FeatureCard(
+                              icon: Icons.content_copy_rounded,
+                              title: 'CopyCatcher',
+                              subtitle: 'Originality check',
+                              iconColor: const Color(0xFFF59E0B),
+                              onTap: () {
+                                openScreen(context, const CopyCatcherScreen());
+                              },
+                            ),
+                          ],
+                        );
+                      },
                     ),
 
                     const SizedBox(height: 28),
@@ -307,7 +328,9 @@ class HomeScreen extends StatelessWidget {
                               size: 28,
                             ),
                           ),
+
                           const SizedBox(width: 14),
+
                           const Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -352,7 +375,9 @@ class HomeScreen extends StatelessWidget {
                               color: Color(0xFF818CF8),
                             ),
                           ),
+
                           const SizedBox(width: 13),
+
                           const Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -405,6 +430,7 @@ class _MiniStatus extends StatelessWidget {
           border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 18, color: const Color(0xFF67E8F9)),
             const SizedBox(height: 4),
@@ -447,6 +473,7 @@ class FeatureCard extends StatelessWidget {
       onTap: onTap,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             height: 58,
@@ -458,19 +485,29 @@ class FeatureCard extends StatelessWidget {
             ),
             child: Icon(icon, size: 29, color: iconColor),
           ),
-          const SizedBox(height: 13),
+
+          const SizedBox(height: 12),
+
           Text(
             title,
             textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
           ),
+
           const SizedBox(height: 5),
+
           Text(
             subtitle,
             textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 11, color: Colors.white54),
           ),
-          const SizedBox(height: 10),
+
+          const SizedBox(height: 9),
+
           Icon(
             Icons.arrow_forward_rounded,
             size: 17,
