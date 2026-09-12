@@ -1,6 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+
+import '../widgets/ai_robot.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -12,6 +15,7 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FlutterTts _tts = FlutterTts();
 
   final _nameController = TextEditingController();
   final _rollNumberController = TextEditingController();
@@ -25,14 +29,76 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
+  AIRobotExpression _robotExpression = AIRobotExpression.happy;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _setupTts();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _speakLoginMessage();
+    });
+  }
+
+  Future<void> _setupTts() async {
+    await _tts.setSpeechRate(0.45);
+    await _tts.setVolume(1.0);
+    await _tts.setPitch(1.05);
+  }
+
+  Future<void> _speakLoginMessage() async {
+    try {
+      await _tts.setLanguage('en-IN');
+
+      await _tts.speak(
+        _isLogin
+            ? 'Welcome to CampusX. Please login to continue.'
+            : 'Welcome to CampusX. Create your student account.',
+      );
+    } catch (_) {
+      // Voice failure should not stop authentication.
+    }
+  }
+
+  Future<void> _speak(String text) async {
+    try {
+      if (mounted) {
+        setState(() {
+          _robotExpression = AIRobotExpression.speaking;
+        });
+      }
+
+      await _tts.setLanguage('en-IN');
+      await _tts.speak(text);
+
+      if (!mounted) return;
+
+      setState(() {
+        _robotExpression = AIRobotExpression.happy;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _robotExpression = AIRobotExpression.idle;
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _tts.stop();
+
     _nameController.dispose();
     _rollNumberController.dispose();
     _collegeIdController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+
     super.dispose();
   }
 
@@ -43,13 +109,11 @@ class _AuthScreenState extends State<AuthScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    // Student registration
     if (!_isLogin && name.isEmpty) {
       _showMessage('Please enter your name.', isError: true);
       return;
     }
 
-    // Roll number is compulsory only for student registration.
     if (!_isLogin && rollNumber.isEmpty) {
       _showMessage('Please enter your roll number.', isError: true);
       return;
@@ -79,6 +143,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     setState(() {
       _loading = true;
+      _robotExpression = AIRobotExpression.thinking;
     });
 
     try {
@@ -133,11 +198,25 @@ class _AuthScreenState extends State<AuthScreen> {
           message = e.message ?? 'Authentication failed.';
       }
 
+      setState(() {
+        _robotExpression = AIRobotExpression.error;
+      });
+
       _showMessage(message, isError: true);
+
+      await _speak(message);
     } catch (e) {
       if (!mounted) return;
 
-      _showMessage(e.toString().replaceFirst('Exception: ', ''), isError: true);
+      final message = e.toString().replaceFirst('Exception: ', '');
+
+      setState(() {
+        _robotExpression = AIRobotExpression.error;
+      });
+
+      _showMessage(message, isError: true);
+
+      await _speak(message);
     } finally {
       if (mounted) {
         setState(() {
@@ -174,6 +253,8 @@ class _AuthScreenState extends State<AuthScreen> {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
+    await _speak('Registration successful. Welcome to CampusX.');
+
     if (!mounted) return;
 
     _showMessage('Registration successful!', isError: false);
@@ -187,7 +268,6 @@ class _AuthScreenState extends State<AuthScreen> {
     required String collegeId,
     required String rollNumber,
   }) async {
-    // First authenticate using email + password.
     final credential = await _auth.signInWithEmailAndPassword(
       email: email,
       password: password,
@@ -199,7 +279,6 @@ class _AuthScreenState extends State<AuthScreen> {
       throw Exception('Unable to login.');
     }
 
-    // Get the user's role from Firestore.
     final userDoc = await _firestore.collection('users').doc(user.uid).get();
 
     if (!userDoc.exists) {
@@ -216,14 +295,12 @@ class _AuthScreenState extends State<AuthScreen> {
 
     final role = (data['role'] ?? 'student').toString().toLowerCase();
 
-    // College ID is compulsory for everyone.
     if (savedCollegeId != collegeId) {
       await _auth.signOut();
 
       throw Exception('College ID does not match.');
     }
 
-    // Roll number is required ONLY for students.
     if (role == 'student') {
       if (rollNumber.isEmpty) {
         await _auth.signOut();
@@ -238,9 +315,16 @@ class _AuthScreenState extends State<AuthScreen> {
       }
     }
 
+    await _speak(
+      role == 'admin'
+          ? 'Welcome admin.'
+          : role == 'teacher'
+          ? 'Welcome teacher.'
+          : 'Welcome back. Your CampusX dashboard is ready.',
+    );
+
     if (!mounted) return;
 
-    // Role-based dashboard routing.
     if (role == 'admin') {
       Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
     } else if (role == 'teacher') {
@@ -264,6 +348,18 @@ class _AuthScreenState extends State<AuthScreen> {
       );
   }
 
+  void _toggleAuthMode() {
+    if (_loading) return;
+
+    setState(() {
+      _isLogin = !_isLogin;
+      _robotExpression = AIRobotExpression.happy;
+      _rollNumberController.clear();
+    });
+
+    _speakLoginMessage();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -278,17 +374,13 @@ class _AuthScreenState extends State<AuthScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  CircleAvatar(
-                    radius: 42,
-                    backgroundColor: theme.colorScheme.primaryContainer,
-                    child: Icon(
-                      Icons.school,
-                      size: 44,
-                      color: theme.colorScheme.primary,
-                    ),
+                  const SizedBox(height: 10),
+
+                  Center(
+                    child: AIRobot(expression: _robotExpression, size: 145),
                   ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 10),
 
                   Text(
                     'CampusX',
@@ -303,12 +395,14 @@ class _AuthScreenState extends State<AuthScreen> {
                   const SizedBox(height: 6),
 
                   Text(
-                    _isLogin ? 'Welcome back' : 'Create your student account',
+                    _isLogin
+                        ? 'Your Smart Campus Assistant'
+                        : 'Create your student account',
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 17),
                   ),
 
-                  const SizedBox(height: 30),
+                  const SizedBox(height: 28),
 
                   Card(
                     child: Padding(
@@ -335,12 +429,9 @@ class _AuthScreenState extends State<AuthScreen> {
                                 prefixIcon: Icon(Icons.person),
                               ),
                             ),
-
                             const SizedBox(height: 14),
                           ],
 
-                          // Roll Number is shown ONLY on
-                          // student registration.
                           if (!_isLogin) ...[
                             TextField(
                               controller: _rollNumberController,
@@ -351,14 +442,9 @@ class _AuthScreenState extends State<AuthScreen> {
                                 prefixIcon: Icon(Icons.badge),
                               ),
                             ),
-
                             const SizedBox(height: 14),
                           ],
 
-                          // On login, we keep the roll number
-                          // field visible because the app does
-                          // not know the user's role until after
-                          // Firebase authentication.
                           if (_isLogin) ...[
                             TextField(
                               controller: _rollNumberController,
@@ -369,7 +455,6 @@ class _AuthScreenState extends State<AuthScreen> {
                                 prefixIcon: Icon(Icons.badge),
                               ),
                             ),
-
                             const SizedBox(height: 14),
                           ],
 
@@ -465,15 +550,7 @@ class _AuthScreenState extends State<AuthScreen> {
                           const SizedBox(height: 12),
 
                           TextButton(
-                            onPressed: _loading
-                                ? null
-                                : () {
-                                    setState(() {
-                                      _isLogin = !_isLogin;
-
-                                      _rollNumberController.clear();
-                                    });
-                                  },
+                            onPressed: _loading ? null : _toggleAuthMode,
                             child: Text(
                               _isLogin
                                   ? 'Create a new student account'
@@ -494,15 +571,15 @@ class _AuthScreenState extends State<AuthScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Icon(
-                            Icons.security,
+                            Icons.smart_toy_outlined,
                             color: theme.colorScheme.primary,
                           ),
                           const SizedBox(width: 12),
                           const Expanded(
                             child: Text(
+                              'CampusX AI Assistant is ready to help. '
                               'Students can register themselves. '
-                              'Teacher and Admin accounts are managed separately. '
-                              'Roll Number is required only for students.',
+                              'Teacher and Admin accounts are managed separately.',
                             ),
                           ),
                         ],
