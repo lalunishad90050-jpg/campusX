@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../widgets/ai_voice_assistant.dart';
+
 class TeacherDashboardScreen extends StatefulWidget {
   const TeacherDashboardScreen({super.key});
 
@@ -41,6 +43,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
   String get dateString {
     final d = selectedDate.day.toString().padLeft(2, '0');
     final m = selectedDate.month.toString().padLeft(2, '0');
+
     return '$d/$m/${selectedDate.year}';
   }
 
@@ -85,6 +88,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
       if (!mounted) return;
 
       setState(() => loading = false);
+
       message('Students load nahi hue: $e', true);
     }
   }
@@ -117,10 +121,12 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
         attendance
           ..clear()
           ..addAll(old);
+
         aiResult = null;
       });
     } catch (e) {
       if (!mounted) return;
+
       message('Attendance load nahi hui: $e', true);
     }
   }
@@ -218,6 +224,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
       if (!mounted) return;
 
       setState(() => aiLoading = false);
+
       message('AI Analytics load nahi hui: $e', true);
     }
   }
@@ -322,10 +329,13 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
       case 'high':
       case 'critical':
         return Colors.red;
+
       case 'medium':
         return Colors.orange;
+
       case 'low':
         return Colors.green;
+
       default:
         return Theme.of(context).colorScheme.primary;
     }
@@ -426,7 +436,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 ),
               ],
             ),
+
             const SizedBox(height: 18),
+
             Row(
               children: [
                 Expanded(
@@ -448,18 +460,23 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 ),
               ],
             ),
+
             const SizedBox(height: 18),
+
             _AISection(
               icon: Icons.insights,
               title: 'AI Insight',
               text: insight,
             ),
+
             const SizedBox(height: 12),
+
             _AISection(
               icon: Icons.lightbulb_outline,
               title: 'Recommendation',
               text: recommendation,
             ),
+
             if (lowStudents.isNotEmpty) ...[
               const SizedBox(height: 16),
               _AIStudentList(
@@ -468,6 +485,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 color: Colors.red,
               ),
             ],
+
             if (highStudents.isNotEmpty) ...[
               const SizedBox(height: 16),
               _AIStudentList(
@@ -476,7 +494,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 color: Colors.green,
               ),
             ],
+
             const SizedBox(height: 16),
+
             SizedBox(
               width: double.infinity,
               height: 48,
@@ -510,168 +530,202 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
           IconButton(onPressed: logout, icon: const Icon(Icons.logout)),
         ],
       ),
+
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: loadStudents,
-              child: ListView(
-                padding: const EdgeInsets.all(20),
-                children: [
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(22),
-                      child: Row(
-                        children: [
-                          const CircleAvatar(
-                            radius: 32,
-                            child: Icon(Icons.person, size: 34),
+          : Stack(
+              children: [
+                RefreshIndicator(
+                  onRefresh: loadStudents,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
+                    children: [
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(22),
+                          child: Row(
+                            children: [
+                              const CircleAvatar(
+                                radius: 32,
+                                child: Icon(Icons.person, size: 34),
+                              ),
+                              const SizedBox(width: 16),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Teacher Attendance Panel',
+                                      style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    SizedBox(height: 5),
+                                    Text('Manage student attendance'),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 16),
-                          const Expanded(
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Column(
+                            children: [
+                              InkWell(
+                                onTap: pickDate,
+                                child: InputDecorator(
+                                  decoration: const InputDecoration(
+                                    labelText: 'Attendance Date',
+                                    prefixIcon: Icon(Icons.calendar_month),
+                                  ),
+                                  child: Text(dateString),
+                                ),
+                              ),
+
+                              const SizedBox(height: 14),
+
+                              DropdownButtonFormField<String>(
+                                initialValue: selectedSection,
+                                decoration: const InputDecoration(
+                                  labelText: 'Class / Section',
+                                  prefixIcon: Icon(Icons.school),
+                                ),
+                                items: sections.map((section) {
+                                  return DropdownMenuItem(
+                                    value: section,
+                                    child: Text(section),
+                                  );
+                                }).toList(),
+                                onChanged: (value) {
+                                  if (value == null) return;
+
+                                  setState(() {
+                                    selectedSection = value;
+                                    aiResult = null;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: summaryCard(
+                              'Present',
+                              presentCount,
+                              Icons.check_circle,
+                              theme,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: summaryCard(
+                              'Absent',
+                              absentCount,
+                              Icons.cancel,
+                              theme,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: summaryCard(
+                              'Total',
+                              students.length,
+                              Icons.groups,
+                              theme,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      aiAnalyticsCard(theme),
+
+                      const SizedBox(height: 24),
+
+                      const Text(
+                        'Student Attendance',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      if (students.isEmpty)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(25),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Teacher Attendance Panel',
+                                const Icon(Icons.people_outline, size: 55),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'No Students Found',
                                   style: TextStyle(
-                                    fontSize: 22,
+                                    fontSize: 19,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                SizedBox(height: 5),
-                                Text('Manage student attendance'),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Students will appear '
+                                  'automatically after '
+                                  'registration.',
+                                  textAlign: TextAlign.center,
+                                ),
                               ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        children: [
-                          InkWell(
-                            onTap: pickDate,
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: 'Attendance Date',
-                                prefixIcon: Icon(Icons.calendar_month),
-                              ),
-                              child: Text(dateString),
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          DropdownButtonFormField<String>(
-                            initialValue: selectedSection,
-                            decoration: const InputDecoration(
-                              labelText: 'Class / Section',
-                              prefixIcon: Icon(Icons.school),
-                            ),
-                            items: sections.map((section) {
-                              return DropdownMenuItem(
-                                value: section,
-                                child: Text(section),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              if (value == null) return;
+                        )
+                      else
+                        ...students.map(
+                          (student) => studentCard(student, theme),
+                        ),
 
-                              setState(() {
-                                selectedSection = value;
-                                aiResult = null;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: summaryCard(
-                          'Present',
-                          presentCount,
-                          Icons.check_circle,
-                          theme,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: summaryCard(
-                          'Absent',
-                          absentCount,
-                          Icons.cancel,
-                          theme,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: summaryCard(
-                          'Total',
-                          students.length,
-                          Icons.groups,
-                          theme,
+                      const SizedBox(height: 18),
+
+                      SizedBox(
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: saving ? null : saveAttendance,
+                          icon: saving
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.save),
+                          label: Text(saving ? 'Saving...' : 'Save Attendance'),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
-                  aiAnalyticsCard(theme),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Student Attendance',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  if (students.isEmpty)
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(25),
-                        child: Column(
-                          children: [
-                            const Icon(Icons.people_outline, size: 55),
-                            const SizedBox(height: 10),
-                            const Text(
-                              'No Students Found',
-                              style: TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Students will appear automatically '
-                              'after registration.',
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    ...students.map((student) => studentCard(student, theme)),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      onPressed: saving ? null : saveAttendance,
-                      icon: saving
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.save),
-                      label: Text(saving ? 'Saving...' : 'Save Attendance'),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+
+                // CampusX AI floating assistant
+                const Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: AIVoiceAssistant(),
+                ),
+              ],
             ),
     );
   }
@@ -722,7 +776,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                     ),
                   ),
                 ),
+
                 const SizedBox(width: 14),
+
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -734,7 +790,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+
                       const SizedBox(height: 4),
+
                       Text(
                         'Roll No: $roll',
                         style: TextStyle(
@@ -742,7 +800,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                           color: theme.colorScheme.primary,
                         ),
                       ),
+
                       const SizedBox(height: 3),
+
                       Text(
                         'College ID: $collegeId',
                         style: TextStyle(
@@ -755,7 +815,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 ),
               ],
             ),
+
             const SizedBox(height: 14),
+
             Row(
               children: [
                 Expanded(
@@ -781,7 +843,9 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                     ),
                   ),
                 ),
+
                 const SizedBox(width: 10),
+
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () {
@@ -923,10 +987,13 @@ class _AIStudentList extends StatelessWidget {
             title,
             style: TextStyle(fontWeight: FontWeight.bold, color: color),
           ),
+
           const SizedBox(height: 8),
+
           ...students.take(8).map((student) {
             if (student is Map) {
               final name = (student['name'] ?? 'Student').toString();
+
               final roll = (student['rollNumber'] ?? '').toString();
 
               return Padding(
