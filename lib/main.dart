@@ -26,51 +26,90 @@ class CampusX extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const background = Color(0xFF070B1A);
+    const surface = Color(0xFF10172A);
+    const primary = Color(0xFF6366F1);
+    const secondary = Color(0xFF22D3EE);
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'CampusX',
 
       theme: ThemeData(
         useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: background,
 
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
-          brightness: Brightness.light,
-        ),
+          seedColor: primary,
+          brightness: Brightness.dark,
+          surface: surface,
+        ).copyWith(primary: primary, secondary: secondary, surface: surface),
 
         appBarTheme: const AppBarTheme(
-          centerTitle: false,
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
           elevation: 0,
-          titleTextStyle: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            fontSize: 21,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
 
         cardTheme: CardThemeData(
-          elevation: 3,
+          color: Colors.white.withValues(alpha: 0.055),
+          elevation: 0,
           margin: EdgeInsets.zero,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
           ),
         ),
 
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+          fillColor: Colors.white.withValues(alpha: 0.06),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(width: 2),
+            borderSide: const BorderSide(color: secondary, width: 1.5),
           ),
         ),
 
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 50),
+            minimumSize: const Size(double.infinity, 52),
+            backgroundColor: primary,
+            foregroundColor: Colors.white,
+            elevation: 0,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(15),
             ),
           ),
+        ),
+
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(double.infinity, 52),
+            foregroundColor: Colors.white,
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(15),
+            ),
+          ),
+        ),
+
+        dividerTheme: DividerThemeData(
+          color: Colors.white.withValues(alpha: 0.08),
         ),
       ),
 
@@ -78,24 +117,14 @@ class CampusX extends StatelessWidget {
 
       routes: {
         '/auth': (context) => const AuthScreen(),
-
         '/': (context) => const HomeScreen(),
-
         '/safety': (context) => const SafetyScreen(),
-
         '/attendance': (context) => const AttendanceScreen(),
-
         '/examwarrior': (context) => const ExamWarriorScreen(),
-
         '/skillbridge': (context) => const SkillBridgeScreen(),
-
         '/copycatcher': (context) => const CopyCatcherScreen(),
-
         '/admin': (context) => const AdminDashboardScreen(),
-
         '/teacher': (context) => const TeacherDashboardScreen(),
-
-        // Campus Map
         '/campus-map': (context) => const CampusMapScreen(),
       },
     );
