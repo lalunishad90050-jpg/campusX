@@ -37,7 +37,7 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
     super.dispose();
   }
 
-  Color _robotColor(BuildContext context) {
+  Color _color(BuildContext context) {
     switch (widget.expression) {
       case AIRobotExpression.happy:
         return Colors.greenAccent;
@@ -54,77 +54,36 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final color = _robotColor(context);
+    final color = _color(context);
 
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        final movement = math.sin(_controller.value * math.pi * 2) * 5;
+        final t = _controller.value * math.pi * 2;
+        final floatY = math.sin(t) * 4;
+        final handMove = math.sin(t) * 3;
 
         return Transform.translate(
-          offset: Offset(0, movement),
+          offset: Offset(0, floatY),
           child: SizedBox(
-            width: widget.size,
-            height: widget.size + 35,
+            width: widget.size * 1.15,
+            height: widget.size * 1.45,
             child: Stack(
               alignment: Alignment.center,
               children: [
                 // Glow
                 Container(
-                  width: widget.size * 0.8,
-                  height: widget.size * 0.8,
+                  width: widget.size * 0.9,
+                  height: widget.size * 0.9,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: color.withValues(alpha: 0.25),
-                        blurRadius: 35,
-                        spreadRadius: 8,
+                        color: color.withValues(alpha: 0.22),
+                        blurRadius: 38,
+                        spreadRadius: 10,
                       ),
                     ],
-                  ),
-                ),
-
-                // Robot body
-                Positioned(
-                  bottom: 0,
-                  child: Container(
-                    width: widget.size * 0.58,
-                    height: widget.size * 0.30,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(28),
-                      color: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainerHighest,
-                      border: Border.all(
-                        color: color.withValues(alpha: 0.7),
-                        width: 2,
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Robot head
-                Positioned(
-                  top: widget.size * 0.15,
-                  child: Container(
-                    width: widget.size * 0.70,
-                    height: widget.size * 0.55,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(32),
-                      color: Theme.of(context).colorScheme.surface,
-                      border: Border.all(color: color, width: 2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: color.withValues(alpha: 0.18),
-                          blurRadius: 22,
-                        ),
-                      ],
-                    ),
-                    child: _RobotFace(
-                      expression: widget.expression,
-                      color: color,
-                    ),
                   ),
                 ),
 
@@ -133,10 +92,17 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
                   top: 0,
                   child: Column(
                     children: [
-                      Container(width: 4, height: 18, color: color),
                       Container(
-                        width: 12,
-                        height: 12,
+                        width: 3,
+                        height: widget.size * 0.13,
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      Container(
+                        width: widget.size * 0.09,
+                        height: widget.size * 0.09,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: color,
@@ -151,11 +117,172 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
                     ],
                   ),
                 ),
+
+                // Head
+                Positioned(
+                  top: widget.size * 0.13,
+                  child: Container(
+                    width: widget.size * 0.68,
+                    height: widget.size * 0.52,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(color: color, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: color.withValues(alpha: 0.18),
+                          blurRadius: 18,
+                        ),
+                      ],
+                    ),
+                    child: _RobotFace(
+                      expression: widget.expression,
+                      color: color,
+                    ),
+                  ),
+                ),
+
+                // Left arm
+                Positioned(
+                  left: widget.size * 0.08,
+                  top: widget.size * 0.58 + handMove,
+                  child: Transform.rotate(
+                    angle: -0.18,
+                    child: _RobotArm(color: color, size: widget.size),
+                  ),
+                ),
+
+                // Right arm
+                Positioned(
+                  right: widget.size * 0.08,
+                  top: widget.size * 0.58 - handMove,
+                  child: Transform.rotate(
+                    angle: 0.18,
+                    child: _RobotArm(color: color, size: widget.size),
+                  ),
+                ),
+
+                // Body
+                Positioned(
+                  top: widget.size * 0.66,
+                  child: Container(
+                    width: widget.size * 0.48,
+                    height: widget.size * 0.36,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: color.withValues(alpha: 0.75),
+                        width: 2,
+                      ),
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: widget.size * 0.20,
+                        height: widget.size * 0.10,
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: color.withValues(alpha: 0.7),
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.auto_awesome_rounded,
+                          size: widget.size * 0.07,
+                          color: color,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Left leg
+                Positioned(
+                  top: widget.size * 1.00,
+                  left: widget.size * 0.38,
+                  child: _RobotLeg(color: color, size: widget.size),
+                ),
+
+                // Right leg
+                Positioned(
+                  top: widget.size * 1.00,
+                  right: widget.size * 0.38,
+                  child: _RobotLeg(color: color, size: widget.size),
+                ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _RobotArm extends StatelessWidget {
+  final Color color;
+  final double size;
+
+  const _RobotArm({required this.color, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: size * 0.065,
+          height: size * 0.20,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withValues(alpha: 0.75), width: 2),
+          ),
+        ),
+        Container(
+          width: size * 0.105,
+          height: size * 0.105,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color.withValues(alpha: 0.18),
+            border: Border.all(color: color, width: 2),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RobotLeg extends StatelessWidget {
+  final Color color;
+  final double size;
+
+  const _RobotLeg({required this.color, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: size * 0.075,
+          height: size * 0.17,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: color.withValues(alpha: 0.75), width: 2),
+          ),
+        ),
+        Container(
+          width: size * 0.15,
+          height: size * 0.07,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: color.withValues(alpha: 0.8)),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -180,21 +307,24 @@ class _RobotFaceState extends State<_RobotFace>
 
     _blinkController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 180),
+      duration: const Duration(milliseconds: 150),
     );
 
     _blinkLoop();
   }
 
   Future<void> _blinkLoop() async {
+    final random = math.Random();
+
     while (mounted) {
-      await Future.delayed(
-        Duration(milliseconds: 2500 + math.Random().nextInt(2500)),
-      );
+      await Future.delayed(Duration(milliseconds: 2200 + random.nextInt(2600)));
 
       if (!mounted) return;
 
       await _blinkController.forward();
+
+      if (!mounted) return;
+
       await _blinkController.reverse();
     }
   }
@@ -208,7 +338,7 @@ class _RobotFaceState extends State<_RobotFace>
   @override
   Widget build(BuildContext context) {
     final eyeHeight = Tween<double>(
-      begin: 18,
+      begin: 16,
       end: 2,
     ).evaluate(_blinkController);
 
@@ -219,11 +349,11 @@ class _RobotFaceState extends State<_RobotFace>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _RobotEye(color: widget.color, height: eyeHeight),
-            const SizedBox(width: 28),
+            const SizedBox(width: 22),
             _RobotEye(color: widget.color, height: eyeHeight),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 13),
         _RobotMouth(color: widget.color, expression: widget.expression),
       ],
     );
@@ -239,14 +369,14 @@ class _RobotEye extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      width: 18,
+      duration: const Duration(milliseconds: 120),
+      width: 16,
       height: height,
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(color: color.withValues(alpha: 0.75), blurRadius: 10),
+          BoxShadow(color: color.withValues(alpha: 0.75), blurRadius: 9),
         ],
       ),
     );
@@ -261,45 +391,55 @@ class _RobotMouth extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (expression == AIRobotExpression.speaking) {
-      return Container(
-        width: 30,
-        height: 18,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(20),
-        ),
-      );
-    }
+    switch (expression) {
+      case AIRobotExpression.speaking:
+        return Container(
+          width: 28,
+          height: 15,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(20),
+          ),
+        );
 
-    if (expression == AIRobotExpression.happy) {
-      return Container(
-        width: 42,
-        height: 18,
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: color, width: 4)),
-          borderRadius: BorderRadius.circular(20),
-        ),
-      );
-    }
+      case AIRobotExpression.happy:
+        return Container(
+          width: 36,
+          height: 17,
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: color, width: 4)),
+            borderRadius: BorderRadius.circular(20),
+          ),
+        );
 
-    if (expression == AIRobotExpression.error) {
-      return Container(
-        width: 35,
-        height: 12,
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: color, width: 4)),
-        ),
-      );
-    }
+      case AIRobotExpression.error:
+        return Container(
+          width: 32,
+          height: 10,
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: color, width: 4)),
+          ),
+        );
 
-    return Container(
-      width: 30,
-      height: 5,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(10),
-      ),
-    );
+      case AIRobotExpression.thinking:
+        return Container(
+          width: 24,
+          height: 5,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(10),
+          ),
+        );
+
+      case AIRobotExpression.idle:
+        return Container(
+          width: 25,
+          height: 5,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(10),
+          ),
+        );
+    }
   }
 }

@@ -938,4 +938,114 @@ Rules:
         raise HTTPException(
             status_code=500,
             detail=f"Teacher Attendance AI error: {str(e)}",
+        )# ==============================
+# CAMPUSX AI VOICE ASSISTANT
+# ==============================
+
+class AssistantRequest(BaseModel):
+    role: str
+    question: str
+    context: dict = {}
+
+
+@app.post("/assistant/chat")
+def assistant_chat(request: AssistantRequest):
+    try:
+        role = request.role.strip().lower()
+        question = request.question.strip()
+        context = request.context or {}
+
+        if not question:
+            raise HTTPException(
+                status_code=400,
+                detail="Question is required."
+            )
+
+        system_prompt = """
+You are CampusX AI, the intelligent voice assistant inside a college
+smart-campus application.
+
+You help students, teachers and administrators.
+
+IMPORTANT RULES:
+- Answer only using the information available in the provided context.
+- Never invent attendance numbers, safety reports, students or other data.
+- If the context does not contain the requested information, clearly say
+  that the information is currently unavailable.
+- Keep answers short because the answer will be spoken aloud.
+- Normally use 1 to 3 short sentences.
+- Understand English, Hindi and Hinglish questions.
+- Reply in the same language style as the user's question.
+- For Hindi questions, return natural Hindi in Devanagari script.
+- For English questions, return English.
+- Do not mention APIs, databases, JSON, backend or internal implementation.
+- Be friendly and helpful.
+
+ROLE:
+The user can be a student, teacher or admin.
+
+CONTEXT:
+The Flutter app provides trusted campus data in the context object.
+Use that data when answering.
+"""
+
+        user_prompt = f"""
+User role:
+{role}
+
+User question:
+{question}
+
+Available CampusX context:
+{json.dumps(context, ensure_ascii=False, default=str)}
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-5.6-luna",
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+            temperature=0.2,
+        )
+
+        reply = response.choices[0].message.content
+
+        if not reply:
+            raise HTTPException(
+                status_code=500,
+                detail="AI returned an empty response."
+            )
+
+        reply = reply.strip()
+
+        # Detect response language for Flutter TTS.
+        hindi_chars = any(
+            "\u0900" <= char <= "\u097F"
+            for char in reply
+        )
+
+        language = "hi" if hindi_chars else "en"
+
+        return {
+            "reply": reply,
+            "language": language,
+            "role": role,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(f"Assistant error: {e}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="CampusX AI assistant is temporarily unavailable."
         )

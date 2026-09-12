@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/ai_voice_assistant.dart';
 import '../widgets/animated_3d_background.dart';
 import '../widgets/campusx_glass_card.dart';
 
@@ -22,7 +23,6 @@ class HomeScreen extends StatelessWidget {
 
     return Scaffold(
       extendBodyBehindAppBar: true,
-
       appBar: AppBar(
         title: const Row(
           children: [
@@ -34,7 +34,6 @@ class HomeScreen extends StatelessWidget {
             ),
           ],
         ),
-
         actions: [
           IconButton(
             onPressed: () {
@@ -47,69 +46,285 @@ class HomeScreen extends StatelessWidget {
           const SizedBox(width: 8),
         ],
       ),
-
       body: CampusXAnimatedBackground(
         child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 82, 18, 32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // HERO
-                CampusXGlassCard(
-                  padding: const EdgeInsets.all(22),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+          child: Stack(
+            children: [
+              SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(18, 82, 18, 125),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CampusXGlassCard(
+                      padding: const EdgeInsets.all(22),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            height: 52,
-                            width: 52,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(16),
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFF6366F1), Color(0xFF22D3EE)],
+                          Row(
+                            children: [
+                              Container(
+                                height: 52,
+                                width: 52,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(16),
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFF6366F1),
+                                      Color(0xFF22D3EE),
+                                    ],
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.auto_awesome_rounded,
+                                  color: Colors.white,
+                                  size: 27,
+                                ),
                               ),
-                            ),
-                            child: const Icon(
-                              Icons.auto_awesome_rounded,
-                              color: Colors.white,
-                              size: 27,
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 11,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF22D3EE)
+                                      .withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(30),
+                                  border: Border.all(
+                                    color: const Color(0xFF22D3EE)
+                                        .withValues(alpha: 0.20),
+                                  ),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(
+                                      Icons.circle,
+                                      size: 7,
+                                      color: Color(0xFF22D3EE),
+                                    ),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'SMART CAMPUS',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1,
+                                        color: Color(0xFF67E8F9),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Welcome to CampusX 👋',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.5,
                             ),
                           ),
-
-                          const Spacer(),
-
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 11,
-                              vertical: 7,
+                          const SizedBox(height: 7),
+                          Text(
+                            'Your intelligent campus companion',
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.60),
                             ),
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            children: [
+                              _MiniStatus(
+                                icon: Icons.security_rounded,
+                                text: 'Safety',
+                              ),
+                              const SizedBox(width: 8),
+                              _MiniStatus(
+                                icon: Icons.school_rounded,
+                                text: 'Learning',
+                              ),
+                              const SizedBox(width: 8),
+                              _MiniStatus(
+                                icon: Icons.work_outline_rounded,
+                                text: 'Career',
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    CampusXGlassCard(
+                      padding: EdgeInsets.zero,
+                      onTap: () {
+                        openScreen(context, const SafetyScreen());
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(19),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              const Color(0xFF6366F1).withValues(alpha: 0.20),
+                              const Color(0xFF22D3EE).withValues(alpha: 0.05),
+                            ],
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              height: 58,
+                              width: 58,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF6366F1)
+                                    .withValues(alpha: 0.20),
+                                borderRadius: BorderRadius.circular(17),
+                              ),
+                              child: const Icon(
+                                Icons.shield_rounded,
+                                color: Color(0xFF818CF8),
+                                size: 31,
+                              ),
+                            ),
+                            const SizedBox(width: 15),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'CampusShield',
+                                    style: TextStyle(
+                                      fontSize: 19,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  SizedBox(height: 5),
+                                  Text(
+                                    'Report unsafe areas and help make campus safer.',
+                                    style: TextStyle(
+                                      color: Colors.white60,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 16,
+                              color: Colors.white54,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 28),
+
+                    const Text(
+                      'Campus Tools',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+
+                    const SizedBox(height: 5),
+
+                    Text(
+                      'Everything you need, connected in one place.',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.50),
+                      ),
+                    ),
+
+                    const SizedBox(height: 15),
+
+                    GridView.count(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 0.98,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: [
+                        FeatureCard(
+                          icon: Icons.fingerprint_rounded,
+                          title: 'Attendance',
+                          subtitle: 'Track attendance',
+                          iconColor: const Color(0xFF22D3EE),
+                          onTap: () {
+                            openScreen(context, const AttendanceScreen());
+                          },
+                        ),
+                        FeatureCard(
+                          icon: Icons.menu_book_rounded,
+                          title: 'ExamWarrior',
+                          subtitle: 'PYQs & practice',
+                          iconColor: const Color(0xFFA78BFA),
+                          onTap: () {
+                            openScreen(context, const ExamWarriorScreen());
+                          },
+                        ),
+                        FeatureCard(
+                          icon: Icons.work_outline_rounded,
+                          title: 'SkillBridge',
+                          subtitle: 'Skills & careers',
+                          iconColor: const Color(0xFF34D399),
+                          onTap: () {
+                            openScreen(context, const SkillBridgeScreen());
+                          },
+                        ),
+                        FeatureCard(
+                          icon: Icons.content_copy_rounded,
+                          title: 'CopyCatcher',
+                          subtitle: 'Originality check',
+                          iconColor: const Color(0xFFF59E0B),
+                          onTap: () {
+                            openScreen(context, const CopyCatcherScreen());
+                          },
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 28),
+                    CampusXGlassCard(
+                      child: Row(
+                        children: [
+                          Container(
+                            height: 50,
+                            width: 50,
                             decoration: BoxDecoration(
                               color: const Color(0xFF22D3EE)
                                   .withValues(alpha: 0.10),
-                              borderRadius: BorderRadius.circular(30),
-                              border: Border.all(
-                                color: const Color(0xFF22D3EE)
-                                    .withValues(alpha: 0.20),
-                              ),
+                              borderRadius: BorderRadius.circular(15),
                             ),
-                            child: const Row(
+                            child: const Icon(
+                              Icons.psychology_rounded,
+                              color: Color(0xFF22D3EE),
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(
-                                  Icons.circle,
-                                  size: 7,
-                                  color: Color(0xFF22D3EE),
-                                ),
-                                SizedBox(width: 6),
                                 Text(
-                                  'SMART CAMPUS',
+                                  'AI-Powered Campus',
                                   style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1,
-                                    color: Color(0xFF67E8F9),
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                SizedBox(height: 5),
+                                Text(
+                                  'Smart insights across safety, learning, attendance and careers.',
+                                  style: TextStyle(
+                                    color: Colors.white60,
+                                    height: 1.3,
                                   ),
                                 ),
                               ],
@@ -117,277 +332,55 @@ class HomeScreen extends StatelessWidget {
                           ),
                         ],
                       ),
+                    ),
 
-                      const SizedBox(height: 24),
+                    const SizedBox(height: 12),
 
-                      Text(
-                        'Welcome to CampusX 👋',
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
-
-                      const SizedBox(height: 7),
-
-                      Text(
-                        'Your intelligent campus companion',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.60),
-                        ),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      Row(
+                    CampusXGlassCard(
+                      child: Row(
                         children: [
-                          _MiniStatus(
-                            icon: Icons.security_rounded,
-                            text: 'Safety',
+                          Container(
+                            height: 46,
+                            width: 46,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.dashboard_customize_rounded,
+                              color: Color(0xFF818CF8),
+                            ),
                           ),
-                          const SizedBox(width: 8),
-                          _MiniStatus(
-                            icon: Icons.school_rounded,
-                            text: 'Learning',
-                          ),
-                          const SizedBox(width: 8),
-                          _MiniStatus(
-                            icon: Icons.work_outline_rounded,
-                            text: 'Career',
+                          const SizedBox(width: 13),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'One Smart Dashboard',
+                                  style: TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'All CampusX tools are just one tap away.',
+                                  style: TextStyle(color: Colors.white60),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // SAFETY
-                CampusXGlassCard(
-                  padding: EdgeInsets.zero,
-                  onTap: () {
-                    openScreen(context, const SafetyScreen());
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(19),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          const Color(0xFF6366F1).withValues(alpha: 0.20),
-                          const Color(0xFF22D3EE).withValues(alpha: 0.05),
-                        ],
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          height: 58,
-                          width: 58,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF6366F1)
-                                .withValues(alpha: 0.20),
-                            borderRadius: BorderRadius.circular(17),
-                          ),
-                          child: const Icon(
-                            Icons.shield_rounded,
-                            color: Color(0xFF818CF8),
-                            size: 31,
-                          ),
-                        ),
-
-                        const SizedBox(width: 15),
-
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'CampusShield',
-                                style: TextStyle(
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              SizedBox(height: 5),
-                              Text(
-                                'Report unsafe areas and help make campus safer.',
-                                style: TextStyle(
-                                  color: Colors.white60,
-                                  height: 1.3,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const Icon(
-                          Icons.arrow_forward_ios_rounded,
-                          size: 16,
-                          color: Colors.white54,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 28),
-
-                const Text(
-                  'Campus Tools',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-                ),
-
-                const SizedBox(height: 5),
-
-                Text(
-                  'Everything you need, connected in one place.',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.50)),
-                ),
-
-                const SizedBox(height: 15),
-
-                GridView.count(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 0.98,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: [
-                    FeatureCard(
-                      icon: Icons.fingerprint_rounded,
-                      title: 'Attendance',
-                      subtitle: 'Track attendance',
-                      iconColor: const Color(0xFF22D3EE),
-                      onTap: () {
-                        openScreen(context, const AttendanceScreen());
-                      },
-                    ),
-
-                    FeatureCard(
-                      icon: Icons.menu_book_rounded,
-                      title: 'ExamWarrior',
-                      subtitle: 'PYQs & practice',
-                      iconColor: const Color(0xFFA78BFA),
-                      onTap: () {
-                        openScreen(context, const ExamWarriorScreen());
-                      },
-                    ),
-
-                    FeatureCard(
-                      icon: Icons.work_outline_rounded,
-                      title: 'SkillBridge',
-                      subtitle: 'Skills & careers',
-                      iconColor: const Color(0xFF34D399),
-                      onTap: () {
-                        openScreen(context, const SkillBridgeScreen());
-                      },
-                    ),
-
-                    FeatureCard(
-                      icon: Icons.content_copy_rounded,
-                      title: 'CopyCatcher',
-                      subtitle: 'Originality check',
-                      iconColor: const Color(0xFFF59E0B),
-                      onTap: () {
-                        openScreen(context, const CopyCatcherScreen());
-                      },
                     ),
                   ],
                 ),
+              ),
 
-                const SizedBox(height: 28),
-
-                // AI FEATURE
-                CampusXGlassCard(
-                  child: Row(
-                    children: [
-                      Container(
-                        height: 50,
-                        width: 50,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF22D3EE)
-                              .withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                        child: const Icon(
-                          Icons.psychology_rounded,
-                          color: Color(0xFF22D3EE),
-                          size: 28,
-                        ),
-                      ),
-
-                      const SizedBox(width: 14),
-
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'AI-Powered Campus',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            SizedBox(height: 5),
-                            Text(
-                              'Smart insights across safety, learning, attendance and careers.',
-                              style: TextStyle(
-                                color: Colors.white60,
-                                height: 1.3,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                CampusXGlassCard(
-                  child: Row(
-                    children: [
-                      Container(
-                        height: 46,
-                        width: 46,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF6366F1)
-                              .withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: const Icon(
-                          Icons.dashboard_customize_rounded,
-                          color: Color(0xFF818CF8),
-                        ),
-                      ),
-
-                      const SizedBox(width: 13),
-
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'One Smart Dashboard',
-                              style: TextStyle(fontWeight: FontWeight.w800),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'All CampusX tools are just one tap away.',
-                              style: TextStyle(color: Colors.white60),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              // =========================
+              // FLOATING AI ROBOT
+              // =========================
+              const Positioned(right: 8, bottom: 14, child: AIVoiceAssistant()),
+            ],
           ),
         ),
       ),
@@ -465,25 +458,19 @@ class FeatureCard extends StatelessWidget {
             ),
             child: Icon(icon, size: 29, color: iconColor),
           ),
-
           const SizedBox(height: 13),
-
           Text(
             title,
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
           ),
-
           const SizedBox(height: 5),
-
           Text(
             subtitle,
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 11, color: Colors.white54),
           ),
-
           const SizedBox(height: 10),
-
           Icon(
             Icons.arrow_forward_rounded,
             size: 17,

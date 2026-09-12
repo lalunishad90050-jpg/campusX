@@ -17,8 +17,10 @@ class _AuthScreenState extends State<AuthScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FlutterTts _tts = FlutterTts();
 
+  final _formKey = GlobalKey<FormState>();
+
   final _nameController = TextEditingController();
-  final _rollNumberController = TextEditingController();
+  final _rollController = TextEditingController();
   final _collegeIdController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -29,245 +31,161 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
-  AIRobotExpression _robotExpression = AIRobotExpression.happy;
+  bool _loginPromptStarted = false;
+
+  AIRobotExpression _robotExpression = AIRobotExpression.idle;
 
   @override
   void initState() {
     super.initState();
-
     _setupTts();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _speakLoginMessage();
-    });
   }
 
   Future<void> _setupTts() async {
     await _tts.setSpeechRate(0.45);
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.05);
+
+    await _tts.awaitSpeakCompletion(true);
+
+    await _speakLoginMessage();
   }
 
   Future<void> _speakLoginMessage() async {
-    try {
-      await _tts.setLanguage('en-IN');
+    if (!_isLogin || _loginPromptStarted) return;
 
-      await _tts.speak(
-        _isLogin
-            ? 'Welcome to CampusX. Please login to continue.'
-            : 'Welcome to CampusX. Create your student account.',
+    _loginPromptStarted = true;
+
+    if (!mounted) return;
+
+    setState(() {
+      _robotExpression = AIRobotExpression.speaking;
+    });
+
+    for (int i = 0; i < 10; i++) {
+      if (!_isLogin || !mounted) break;
+
+      await _speak('Welcome to CampusX. Please login to continue.', 'en-IN');
+
+      if (!_isLogin || !mounted) break;
+
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      await _speak(
+        'CampusX mein aapka swagat hai. Kripya login kijiye.',
+        'hi-IN',
       );
-    } catch (_) {
-      // Voice failure should not stop authentication.
+
+      if (!_isLogin || !mounted) break;
+
+      await Future.delayed(const Duration(milliseconds: 500));
     }
-  }
 
-  Future<void> _speak(String text) async {
-    try {
-      if (mounted) {
-        setState(() {
-          _robotExpression = AIRobotExpression.speaking;
-        });
-      }
-
-      await _tts.setLanguage('en-IN');
-      await _tts.speak(text);
-
-      if (!mounted) return;
-
-      setState(() {
-        _robotExpression = AIRobotExpression.happy;
-      });
-    } catch (_) {
-      if (!mounted) return;
-
+    if (mounted) {
       setState(() {
         _robotExpression = AIRobotExpression.idle;
       });
     }
   }
 
-  @override
-  void dispose() {
-    _tts.stop();
+  Future<void> _speak(String text, String language) async {
+    try {
+      await _tts.setLanguage(language);
 
-    _nameController.dispose();
-    _rollNumberController.dispose();
-    _collegeIdController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
+      if (mounted) {
+        setState(() {
+          _robotExpression = AIRobotExpression.speaking;
+        });
+      }
 
-    super.dispose();
+      await _tts.speak(text);
+    } catch (_) {
+      // If the selected voice is unavailable, continue silently.
+    }
   }
 
   Future<void> _submit() async {
-    final name = _nameController.text.trim();
-    final rollNumber = _rollNumberController.text.trim();
-    final collegeId = _collegeIdController.text.trim();
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-
-    if (!_isLogin && name.isEmpty) {
-      _showMessage('Please enter your name.', isError: true);
+    if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    if (!_isLogin && rollNumber.isEmpty) {
-      _showMessage('Please enter your roll number.', isError: true);
-      return;
+    FocusScope.of(context).unfocus();
+
+    await _tts.stop();
+
+    if (mounted) {
+      setState(() {
+        _robotExpression = AIRobotExpression.thinking;
+        _loading = true;
+      });
     }
-
-    if (collegeId.isEmpty) {
-      _showMessage('Please enter your college ID.', isError: true);
-      return;
-    }
-
-    if (email.isEmpty) {
-      _showMessage('Please enter your email.', isError: true);
-      return;
-    }
-
-    if (password.isEmpty) {
-      _showMessage('Please enter your password.', isError: true);
-      return;
-    }
-
-    if (!_isLogin && _confirmPasswordController.text != password) {
-      _showMessage('Passwords do not match.', isError: true);
-      return;
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      _loading = true;
-      _robotExpression = AIRobotExpression.thinking;
-    });
 
     try {
       if (_isLogin) {
-        await _login(
-          email: email,
-          password: password,
-          collegeId: collegeId,
-          rollNumber: rollNumber,
-        );
+        await _login();
       } else {
-        await _register(
-          name: name,
-          rollNumber: rollNumber,
-          collegeId: collegeId,
-          email: email,
-          password: password,
-        );
+        await _register();
       }
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
+      setState(() {
+        _robotExpression = AIRobotExpression.error;
+      });
+
       String message;
 
       switch (e.code) {
-        case 'email-already-in-use':
-          message = 'This email is already registered.';
-          break;
-
-        case 'invalid-email':
-          message = 'Please enter a valid email.';
-          break;
-
-        case 'weak-password':
-          message = 'Password is too weak.';
-          break;
-
         case 'user-not-found':
           message = 'No account found with this email.';
           break;
 
         case 'wrong-password':
         case 'invalid-credential':
-          message = 'Incorrect email or password.';
+          message = 'Invalid email or password.';
           break;
 
-        case 'too-many-requests':
-          message = 'Too many attempts. Try again later.';
+        case 'email-already-in-use':
+          message = 'This email is already registered.';
+          break;
+
+        case 'weak-password':
+          message = 'Password is too weak.';
+          break;
+
+        case 'invalid-email':
+          message = 'Please enter a valid email address.';
           break;
 
         default:
           message = e.message ?? 'Authentication failed.';
       }
 
-      setState(() {
-        _robotExpression = AIRobotExpression.error;
-      });
-
-      _showMessage(message, isError: true);
-
-      await _speak(message);
+      _showMessage(message);
+      await _speak(message, 'en-IN');
     } catch (e) {
       if (!mounted) return;
 
-      final message = e.toString().replaceFirst('Exception: ', '');
-
       setState(() {
         _robotExpression = AIRobotExpression.error;
       });
 
-      _showMessage(message, isError: true);
-
-      await _speak(message);
+      _showMessage('Something went wrong. Please try again.');
+      await _speak('Something went wrong. Please try again.', 'en-IN');
     } finally {
       if (mounted) {
         setState(() {
           _loading = false;
+          _robotExpression = AIRobotExpression.idle;
         });
       }
     }
   }
 
-  Future<void> _register({
-    required String name,
-    required String rollNumber,
-    required String collegeId,
-    required String email,
-    required String password,
-  }) async {
-    final credential = await _auth.createUserWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
+  Future<void> _login() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
 
-    final user = credential.user;
-
-    if (user == null) {
-      throw Exception('Unable to create account.');
-    }
-
-    await _firestore.collection('users').doc(user.uid).set({
-      'name': name,
-      'rollNumber': rollNumber,
-      'collegeId': collegeId,
-      'email': email,
-      'role': 'student',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    await _speak('Registration successful. Welcome to CampusX.');
-
-    if (!mounted) return;
-
-    _showMessage('Registration successful!', isError: false);
-
-    Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-  }
-
-  Future<void> _login({
-    required String email,
-    required String password,
-    required String collegeId,
-    required String rollNumber,
-  }) async {
     final credential = await _auth.signInWithEmailAndPassword(
       email: email,
       password: password,
@@ -276,317 +194,476 @@ class _AuthScreenState extends State<AuthScreen> {
     final user = credential.user;
 
     if (user == null) {
-      throw Exception('Unable to login.');
+      throw FirebaseAuthException(
+        code: 'invalid-user',
+        message: 'Unable to login.',
+      );
     }
 
     final userDoc = await _firestore.collection('users').doc(user.uid).get();
 
     if (!userDoc.exists) {
-      await _auth.signOut();
-
-      throw Exception('User profile not found. Please contact admin.');
+      _showMessage('User profile not found.');
+      return;
     }
 
     final data = userDoc.data() ?? {};
-
-    final savedCollegeId = (data['collegeId'] ?? '').toString().trim();
-
-    final savedRollNumber = (data['rollNumber'] ?? '').toString().trim();
-
-    final role = (data['role'] ?? 'student').toString().toLowerCase();
-
-    if (savedCollegeId != collegeId) {
-      await _auth.signOut();
-
-      throw Exception('College ID does not match.');
-    }
-
-    if (role == 'student') {
-      if (rollNumber.isEmpty) {
-        await _auth.signOut();
-
-        throw Exception('Roll number is required for student login.');
-      }
-
-      if (savedRollNumber != rollNumber) {
-        await _auth.signOut();
-
-        throw Exception('Roll number does not match.');
-      }
-    }
-
-    await _speak(
-      role == 'admin'
-          ? 'Welcome admin.'
-          : role == 'teacher'
-          ? 'Welcome teacher.'
-          : 'Welcome back. Your CampusX dashboard is ready.',
-    );
+    final role = data['role'] ?? 'student';
 
     if (!mounted) return;
 
     if (role == 'admin') {
-      Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
+      await _speak('Welcome Admin. Opening your dashboard.', 'en-IN');
+
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/admin');
     } else if (role == 'teacher') {
-      Navigator.pushNamedAndRemoveUntil(context, '/teacher', (route) => false);
+      await _speak('Welcome Teacher. Opening your dashboard.', 'en-IN');
+
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/teacher');
     } else {
-      Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+      await _speak('Welcome Student. Opening CampusX.', 'en-IN');
+
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/');
     }
   }
 
-  void _showMessage(String message, {required bool isError}) {
+  Future<void> _register() async {
+    final name = _nameController.text.trim();
+    final rollNumber = _rollController.text.trim();
+    final collegeId = _collegeIdController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    final credential = await _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+
+    final user = credential.user;
+
+    if (user == null) {
+      throw FirebaseAuthException(
+        code: 'registration-failed',
+        message: 'Unable to create account.',
+      );
+    }
+
+    await _firestore.collection('users').doc(user.uid).set({
+      'uid': user.uid,
+      'name': name,
+      'rollNumber': rollNumber,
+      'collegeId': collegeId,
+      'email': email,
+      'role': 'student',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    if (!mounted) return;
+
+    _showMessage('Account created successfully!');
+
+    await _speak(
+      'Your CampusX account has been created successfully.',
+      'en-IN',
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _isLogin = true;
+      _loginPromptStarted = false;
+    });
+
+    _clearForm();
+
+    await _speakLoginMessage();
+  }
+
+  void _clearForm() {
+    _nameController.clear();
+    _rollController.clear();
+    _collegeIdController.clear();
+    _emailController.clear();
+    _passwordController.clear();
+    _confirmPasswordController.clear();
+  }
+
+  void _toggleAuthMode() async {
+    await _tts.stop();
+
+    if (!mounted) return;
+
+    setState(() {
+      _isLogin = !_isLogin;
+      _loading = false;
+      _robotExpression = AIRobotExpression.idle;
+
+      if (!_isLogin) {
+        _loginPromptStarted = true;
+      } else {
+        _loginPromptStarted = false;
+      }
+    });
+
+    if (_isLogin) {
+      await _speakLoginMessage();
+    }
+  }
+
+  void _showMessage(String message) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: isError ? Theme.of(context).colorScheme.error : null,
-        ),
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
   }
 
-  void _toggleAuthMode() {
-    if (_loading) return;
+  @override
+  void dispose() {
+    _tts.stop();
 
-    setState(() {
-      _isLogin = !_isLogin;
-      _robotExpression = AIRobotExpression.happy;
-      _rollNumberController.clear();
-    });
+    _nameController.dispose();
+    _rollController.dispose();
+    _collegeIdController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
 
-    _speakLoginMessage();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(20),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 500),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 10),
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 20),
 
-                  Center(
-                    child: AIRobot(expression: _robotExpression, size: 145),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  Text(
-                    'CampusX',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.primary,
+                    // --------------------------------------------------
+                    // ROBOT
+                    // --------------------------------------------------
+                    Center(
+                      child: AIRobot(expression: _robotExpression, size: 190),
                     ),
-                  ),
 
-                  const SizedBox(height: 6),
+                    const SizedBox(height: 12),
 
-                  Text(
-                    _isLogin
-                        ? 'Your Smart Campus Assistant'
-                        : 'Create your student account',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 17),
-                  ),
+                    Text(
+                      'CampusX',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
 
-                  const SizedBox(height: 28),
+                    const SizedBox(height: 4),
 
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(22),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            _isLogin ? 'Login' : 'Student Registration',
-                            style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                    Text(
+                      _isLogin
+                          ? 'Welcome back to your smart campus.'
+                          : 'Create your CampusX student account.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
 
-                          const SizedBox(height: 20),
+                    const SizedBox(height: 28),
 
-                          if (!_isLogin) ...[
-                            TextField(
-                              controller: _nameController,
-                              textCapitalization: TextCapitalization.words,
-                              decoration: const InputDecoration(
-                                labelText: 'Full Name *',
-                                prefixIcon: Icon(Icons.person),
+                    // --------------------------------------------------
+                    // LOGIN / REGISTER CARD
+                    // --------------------------------------------------
+                    Card(
+                      elevation: 0,
+                      color: isDark ? const Color(0xFF11172A) : theme.cardColor,
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              _isLogin ? 'Login' : 'Create Account',
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(height: 14),
-                          ],
 
-                          if (!_isLogin) ...[
-                            TextField(
-                              controller: _rollNumberController,
-                              keyboardType: TextInputType.text,
-                              decoration: const InputDecoration(
-                                labelText: 'Roll Number *',
-                                hintText: 'e.g. 141',
-                                prefixIcon: Icon(Icons.badge),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                          ],
+                            const SizedBox(height: 20),
 
-                          if (_isLogin) ...[
-                            TextField(
-                              controller: _rollNumberController,
-                              keyboardType: TextInputType.text,
-                              decoration: const InputDecoration(
-                                labelText: 'Roll Number (Student only)',
-                                hintText: 'Leave empty for Teacher/Admin',
-                                prefixIcon: Icon(Icons.badge),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                          ],
-
-                          TextField(
-                            controller: _collegeIdController,
-                            textCapitalization: TextCapitalization.characters,
-                            decoration: const InputDecoration(
-                              labelText: 'College ID *',
-                              hintText: 'e.g. BIT-26/CSE/D/141',
-                              prefixIcon: Icon(Icons.school),
-                            ),
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          TextField(
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            decoration: const InputDecoration(
-                              labelText: 'Email *',
-                              prefixIcon: Icon(Icons.email),
-                            ),
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          TextField(
-                            controller: _passwordController,
-                            obscureText: _obscurePassword,
-                            decoration: InputDecoration(
-                              labelText: 'Password *',
-                              prefixIcon: const Icon(Icons.lock),
-                              suffixIcon: IconButton(
-                                onPressed: () {
-                                  setState(() {
-                                    _obscurePassword = !_obscurePassword;
-                                  });
-                                },
-                                icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility
-                                      : Icons.visibility_off,
+                            // ------------------------------------------------
+                            // REGISTER FIELDS
+                            // ------------------------------------------------
+                            if (!_isLogin) ...[
+                              TextFormField(
+                                controller: _nameController,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(
+                                  labelText: 'Full Name',
+                                  prefixIcon: Icon(Icons.person_outline),
                                 ),
+                                validator: (value) {
+                                  if (!_isLogin &&
+                                      (value == null || value.trim().isEmpty)) {
+                                    return 'Please enter your name';
+                                  }
+                                  return null;
+                                },
                               ),
-                            ),
-                          ),
 
-                          if (!_isLogin) ...[
+                              const SizedBox(height: 14),
+
+                              TextFormField(
+                                controller: _rollController,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(
+                                  labelText: 'Roll Number',
+                                  prefixIcon: Icon(Icons.badge_outlined),
+                                ),
+                                validator: (value) {
+                                  if (!_isLogin &&
+                                      (value == null || value.trim().isEmpty)) {
+                                    return 'Please enter roll number';
+                                  }
+                                  return null;
+                                },
+                              ),
+
+                              const SizedBox(height: 14),
+
+                              TextFormField(
+                                controller: _collegeIdController,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(
+                                  labelText: 'College ID',
+                                  prefixIcon: Icon(Icons.school_outlined),
+                                ),
+                                validator: (value) {
+                                  if (!_isLogin &&
+                                      (value == null || value.trim().isEmpty)) {
+                                    return 'Please enter college ID';
+                                  }
+                                  return null;
+                                },
+                              ),
+
+                              const SizedBox(height: 14),
+                            ],
+
+                            // ------------------------------------------------
+                            // EMAIL
+                            // ------------------------------------------------
+                            TextFormField(
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              decoration: const InputDecoration(
+                                labelText: 'Email',
+                                prefixIcon: Icon(Icons.email_outlined),
+                              ),
+                              validator: (value) {
+                                final email = value?.trim() ?? '';
+
+                                if (email.isEmpty) {
+                                  return 'Please enter email';
+                                }
+
+                                if (!email.contains('@') ||
+                                    !email.contains('.')) {
+                                  return 'Please enter a valid email';
+                                }
+
+                                return null;
+                              },
+                            ),
+
                             const SizedBox(height: 14),
 
-                            TextField(
-                              controller: _confirmPasswordController,
-                              obscureText: _obscureConfirmPassword,
+                            // ------------------------------------------------
+                            // PASSWORD
+                            // ------------------------------------------------
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              textInputAction: _isLogin
+                                  ? TextInputAction.done
+                                  : TextInputAction.next,
+                              onFieldSubmitted: (_) {
+                                if (_isLogin && !_loading) {
+                                  _submit();
+                                }
+                              },
                               decoration: InputDecoration(
-                                labelText: 'Confirm Password *',
+                                labelText: 'Password',
                                 prefixIcon: const Icon(Icons.lock_outline),
                                 suffixIcon: IconButton(
                                   onPressed: () {
                                     setState(() {
-                                      _obscureConfirmPassword =
-                                          !_obscureConfirmPassword;
+                                      _obscurePassword = !_obscurePassword;
                                     });
                                   },
                                   icon: Icon(
-                                    _obscureConfirmPassword
-                                        ? Icons.visibility
-                                        : Icons.visibility_off,
+                                    _obscurePassword
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
                                   ),
                                 ),
                               ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Please enter password';
+                                }
+
+                                if (value.length < 6) {
+                                  return 'Password must be at least 6 characters';
+                                }
+
+                                return null;
+                              },
+                            ),
+
+                            // ------------------------------------------------
+                            // CONFIRM PASSWORD
+                            // ------------------------------------------------
+                            if (!_isLogin) ...[
+                              const SizedBox(height: 14),
+
+                              TextFormField(
+                                controller: _confirmPasswordController,
+                                obscureText: _obscureConfirmPassword,
+                                textInputAction: TextInputAction.done,
+                                decoration: InputDecoration(
+                                  labelText: 'Confirm Password',
+                                  prefixIcon: const Icon(Icons.lock_reset),
+                                  suffixIcon: IconButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        _obscureConfirmPassword =
+                                            !_obscureConfirmPassword;
+                                      });
+                                    },
+                                    icon: Icon(
+                                      _obscureConfirmPassword
+                                          ? Icons.visibility_outlined
+                                          : Icons.visibility_off_outlined,
+                                    ),
+                                  ),
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please confirm password';
+                                  }
+
+                                  if (value != _passwordController.text) {
+                                    return 'Passwords do not match';
+                                  }
+
+                                  return null;
+                                },
+                              ),
+                            ],
+
+                            const SizedBox(height: 22),
+
+                            // ------------------------------------------------
+                            // SUBMIT BUTTON
+                            // ------------------------------------------------
+                            SizedBox(
+                              height: 52,
+                              child: ElevatedButton.icon(
+                                onPressed: _loading ? null : _submit,
+                                icon: _loading
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Icon(
+                                        _isLogin
+                                            ? Icons.login_rounded
+                                            : Icons.person_add_alt_1_rounded,
+                                      ),
+                                label: Text(
+                                  _loading
+                                      ? 'Please wait...'
+                                      : (_isLogin ? 'Login' : 'Create Account'),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // ------------------------------------------------
+                            // SWITCH LOGIN / REGISTER
+                            // ------------------------------------------------
+                            TextButton(
+                              onPressed: _loading ? null : _toggleAuthMode,
+                              child: Text(
+                                _isLogin
+                                    ? "Don't have an account? Register"
+                                    : 'Already have an account? Login',
+                              ),
                             ),
                           ],
-
-                          const SizedBox(height: 22),
-
-                          ElevatedButton(
-                            onPressed: _loading ? null : _submit,
-                            child: _loading
-                                ? const SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : Text(
-                                    _isLogin
-                                        ? 'Login'
-                                        : 'Create Student Account',
-                                  ),
-                          ),
-
-                          const SizedBox(height: 12),
-
-                          TextButton(
-                            onPressed: _loading ? null : _toggleAuthMode,
-                            child: Text(
-                              _isLogin
-                                  ? 'Create a new student account'
-                                  : 'Already have an account? Login',
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
 
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 18),
 
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.smart_toy_outlined,
-                            color: theme.colorScheme.primary,
-                          ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'CampusX AI Assistant is ready to help. '
-                              'Students can register themselves. '
-                              'Teacher and Admin accounts are managed separately.',
-                            ),
-                          ),
-                        ],
+                    // --------------------------------------------------
+                    // ROBOT STATUS
+                    // --------------------------------------------------
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: Text(
+                        _robotExpression == AIRobotExpression.thinking
+                            ? '🤖 Thinking...'
+                            : _robotExpression == AIRobotExpression.speaking
+                            ? '🤖 Speaking...'
+                            : _robotExpression == AIRobotExpression.error
+                            ? '🤖 Something went wrong'
+                            : '🤖 CampusX AI Assistant',
+                        key: ValueKey(_robotExpression),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+
+                    const SizedBox(height: 20),
+
+                    Text(
+                      'CampusX • AI-Powered Smart Campus',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+                  ],
+                ),
               ),
             ),
           ),
