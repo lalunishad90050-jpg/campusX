@@ -56,26 +56,26 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     final color = _color(context);
 
-    // Keep the robot compact inside the available dashboard space.
-    final s = widget.size.clamp(48.0, 150.0);
+    // Keep the complete robot safely inside its own box.
+    final s = widget.size.clamp(48.0, 150.0).toDouble();
 
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
         final t = _controller.value * math.pi * 2;
 
-        final floatY = math.sin(t) * 2.5;
+        final floatY = math.sin(t) * 1.5;
 
         final handMove = widget.expression == AIRobotExpression.speaking
-            ? math.sin(t * 2) * 4
-            : math.sin(t) * 2;
+            ? math.sin(t * 2) * 2.5
+            : math.sin(t) * 1.2;
 
         final bodyScale = widget.expression == AIRobotExpression.thinking
-            ? 1.0 + math.sin(t * 2) * 0.01
+            ? 1.0 + math.sin(t * 2) * 0.006
             : 1.0;
 
         final glowPulse = widget.expression == AIRobotExpression.speaking
-            ? 1.0 + math.sin(t * 2) * 0.06
+            ? 1.0 + math.sin(t * 2) * 0.035
             : 1.0;
 
         return Transform.translate(
@@ -84,29 +84,29 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
             scale: bodyScale,
             child: SizedBox(
               width: s,
-              height: s * 1.30,
+              height: s * 1.28,
               child: Stack(
-                clipBehavior: Clip.none,
+                clipBehavior: Clip.hardEdge,
                 alignment: Alignment.center,
                 children: [
                   // Glow
                   IgnorePointer(
                     child: Container(
-                      width: s * 0.72 * glowPulse,
-                      height: s * 0.72 * glowPulse,
+                      width: s * 0.68 * glowPulse,
+                      height: s * 0.68 * glowPulse,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: color.withValues(alpha: 0.20),
+                            color: color.withValues(alpha: 0.18),
                             blurRadius:
                                 widget.expression == AIRobotExpression.speaking
-                                ? 28
-                                : 22,
+                                ? 22
+                                : 18,
                             spreadRadius:
                                 widget.expression == AIRobotExpression.speaking
-                                ? 7
-                                : 5,
+                                ? 5
+                                : 3,
                           ),
                         ],
                       ),
@@ -115,27 +115,28 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
 
                   // Antenna
                   Positioned(
-                    top: s * 0.01,
+                    top: s * 0.015,
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Container(
-                          width: 2.5,
-                          height: s * 0.09,
+                          width: 2.2,
+                          height: s * 0.075,
                           decoration: BoxDecoration(
                             color: color,
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                         Container(
-                          width: s * 0.07,
-                          height: s * 0.07,
+                          width: s * 0.065,
+                          height: s * 0.065,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: color,
                             boxShadow: [
                               BoxShadow(
-                                color: color.withValues(alpha: 0.7),
-                                blurRadius: 9,
+                                color: color.withValues(alpha: 0.65),
+                                blurRadius: 7,
                               ),
                             ],
                           ),
@@ -147,52 +148,57 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
                   // Head
                   Positioned(
                     top: s * 0.105,
-                    child: Container(
-                      width: s * 0.62,
-                      height: s * 0.43,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: color,
-                          width: widget.expression == AIRobotExpression.speaking
-                              ? 2.5
-                              : 1.8,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withValues(alpha: 0.15),
-                            blurRadius: 12,
+                    child: SizedBox(
+                      width: s * 0.60,
+                      height: s * 0.40,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: color,
+                            width:
+                                widget.expression == AIRobotExpression.speaking
+                                ? 2.2
+                                : 1.6,
                           ),
-                        ],
-                      ),
-                      child: _RobotFace(
-                        expression: widget.expression,
-                        color: color,
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withValues(alpha: 0.13),
+                              blurRadius: 9,
+                            ),
+                          ],
+                        ),
+                        child: _RobotFace(
+                          expression: widget.expression,
+                          color: color,
+                        ),
                       ),
                     ),
-                  ), // Left arm
+                  ),
+
+                  // Left arm
                   Positioned(
-                    left: s * 0.115,
+                    left: s * 0.13,
                     top: s * 0.48 + handMove,
                     child: AnimatedRotation(
                       duration: const Duration(milliseconds: 200),
                       turns: widget.expression == AIRobotExpression.speaking
-                          ? -0.035
-                          : -0.02,
+                          ? -0.025
+                          : -0.015,
                       child: _RobotArm(color: color, size: s),
                     ),
                   ),
 
                   // Right arm
                   Positioned(
-                    right: s * 0.115,
+                    right: s * 0.13,
                     top: s * 0.48 - handMove,
                     child: AnimatedRotation(
                       duration: const Duration(milliseconds: 200),
                       turns: widget.expression == AIRobotExpression.speaking
-                          ? 0.035
-                          : 0.02,
+                          ? 0.025
+                          : 0.015,
                       child: _RobotArm(color: color, size: s),
                     ),
                   ),
@@ -201,38 +207,38 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
                   Positioned(
                     top: s * 0.58,
                     child: Container(
-                      width: s * 0.43,
-                      height: s * 0.31,
+                      width: s * 0.41,
+                      height: s * 0.29,
                       decoration: BoxDecoration(
                         color: Theme.of(context)
                             .colorScheme
                             .surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: color.withValues(alpha: 0.75),
-                          width: 1.8,
+                          color: color.withValues(alpha: 0.72),
+                          width: 1.6,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: color.withValues(alpha: 0.08),
-                            blurRadius: 10,
+                            color: color.withValues(alpha: 0.07),
+                            blurRadius: 8,
                           ),
                         ],
                       ),
                       child: Center(
                         child: Container(
-                          width: s * 0.17,
-                          height: s * 0.085,
+                          width: s * 0.15,
+                          height: s * 0.075,
                           decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
+                            color: color.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(7),
                             border: Border.all(
-                              color: color.withValues(alpha: 0.65),
+                              color: color.withValues(alpha: 0.60),
                             ),
                           ),
                           child: Icon(
                             Icons.auto_awesome_rounded,
-                            size: s * 0.06,
+                            size: s * 0.052,
                             color: color,
                           ),
                         ),
@@ -243,14 +249,14 @@ class _AIRobotState extends State<AIRobot> with SingleTickerProviderStateMixin {
                   // Left leg
                   Positioned(
                     top: s * 0.86,
-                    left: s * 0.385,
+                    left: s * 0.39,
                     child: _RobotLeg(color: color, size: s),
                   ),
 
                   // Right leg
                   Positioned(
                     top: s * 0.86,
-                    right: s * 0.385,
+                    right: s * 0.39,
                     child: _RobotLeg(color: color, size: s),
                   ),
                 ],
@@ -272,23 +278,27 @@ class _RobotArm extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: size * 0.052,
-          height: size * 0.16,
+          width: size * 0.045,
+          height: size * 0.145,
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withValues(alpha: 0.7), width: 1.5),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: color.withValues(alpha: 0.65),
+              width: 1.3,
+            ),
           ),
         ),
         Container(
-          width: size * 0.085,
-          height: size * 0.085,
+          width: size * 0.075,
+          height: size * 0.075,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: color.withValues(alpha: 0.15),
-            border: Border.all(color: color, width: 1.5),
+            color: color.withValues(alpha: 0.13),
+            border: Border.all(color: color, width: 1.3),
           ),
         ),
       ],
@@ -305,25 +315,29 @@ class _RobotLeg extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: size * 0.06,
-          height: size * 0.13,
+          width: size * 0.052,
+          height: size * 0.115,
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.7), width: 1.5),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: color.withValues(alpha: 0.65),
+              width: 1.3,
+            ),
           ),
         ),
         Container(
-          width: size * 0.12,
-          height: size * 0.055,
+          width: size * 0.105,
+          height: size * 0.048,
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(12),
+            color: color.withValues(alpha: 0.13),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: color.withValues(alpha: 0.75),
-              width: 1.2,
+              color: color.withValues(alpha: 0.70),
+              width: 1.1,
             ),
           ),
         ),
@@ -383,18 +397,20 @@ class _RobotFaceState extends State<_RobotFace>
   @override
   Widget build(BuildContext context) {
     final eyeHeight = Tween<double>(
-      begin: 12,
+      begin: 10,
       end: 2,
     ).evaluate(_blinkController);
 
     final eyeWidth = widget.expression == AIRobotExpression.thinking
-        ? 10.0
-        : 12.0;
+        ? 8.5
+        : 10.0;
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Row(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _RobotEye(
@@ -403,7 +419,7 @@ class _RobotFaceState extends State<_RobotFace>
               width: eyeWidth,
               expression: widget.expression,
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             _RobotEye(
               color: widget.color,
               height: eyeHeight,
@@ -412,7 +428,7 @@ class _RobotFaceState extends State<_RobotFace>
             ),
           ],
         ),
-        const SizedBox(height: 9),
+        const SizedBox(height: 7),
         _RobotMouth(color: widget.color, expression: widget.expression),
       ],
     );
@@ -434,7 +450,7 @@ class _RobotEye extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = expression == AIRobotExpression.thinking ? 6.0 : 14.0;
+    final radius = expression == AIRobotExpression.thinking ? 5.0 : 12.0;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 120),
@@ -444,7 +460,7 @@ class _RobotEye extends StatelessWidget {
         color: color,
         borderRadius: BorderRadius.circular(radius),
         boxShadow: [
-          BoxShadow(color: color.withValues(alpha: 0.65), blurRadius: 6),
+          BoxShadow(color: color.withValues(alpha: 0.60), blurRadius: 5),
         ],
       ),
     );
@@ -465,20 +481,20 @@ class _RobotMouth extends StatelessWidget {
 
       case AIRobotExpression.happy:
         return Container(
-          width: 28,
-          height: 13,
+          width: 24,
+          height: 11,
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: color, width: 3)),
-            borderRadius: BorderRadius.circular(16),
+            border: Border(bottom: BorderSide(color: color, width: 2.5)),
+            borderRadius: BorderRadius.circular(14),
           ),
         );
 
       case AIRobotExpression.error:
         return Container(
-          width: 25,
-          height: 8,
+          width: 22,
+          height: 7,
           decoration: BoxDecoration(
-            border: Border(top: BorderSide(color: color, width: 3)),
+            border: Border(top: BorderSide(color: color, width: 2.5)),
           ),
         );
 
@@ -496,8 +512,8 @@ class _RobotMouth extends StatelessWidget {
 
       case AIRobotExpression.idle:
         return Container(
-          width: 20,
-          height: 4,
+          width: 18,
+          height: 3.5,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(8),
@@ -515,8 +531,8 @@ class _ThinkingDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 4,
-      height: 4,
+      width: 3.5,
+      height: 3.5,
       decoration: BoxDecoration(shape: BoxShape.circle, color: color),
     );
   }
@@ -556,18 +572,18 @@ class _SpeakingMouthState extends State<_SpeakingMouth>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        final height = 7 + (_controller.value * 6);
+        final height = 6 + (_controller.value * 4);
 
         return Container(
-          width: 24,
+          width: 21,
           height: height,
           decoration: BoxDecoration(
             color: widget.color,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             boxShadow: [
               BoxShadow(
-                color: widget.color.withValues(alpha: 0.35),
-                blurRadius: 6,
+                color: widget.color.withValues(alpha: 0.30),
+                blurRadius: 5,
               ),
             ],
           ),

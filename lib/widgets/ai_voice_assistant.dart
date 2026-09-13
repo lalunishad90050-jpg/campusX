@@ -40,18 +40,19 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   bool _processingQuestion = false;
 
   int _voiceSession = 0;
+  int _handledResultSession = -1;
 
   String _currentQuestion = '';
   String _lastReply = '';
+
+  Map<String, dynamic>? _cachedUserData;
+  String? _cachedRole;
 
   @override
   void initState() {
     super.initState();
 
-    _setupVoice();
-
-    // Render backend ko background me wake-up kar do.
-    // Isse first AI question ka cold-start delay kam ho sakta hai.
+    unawaited(_setupVoice());
     unawaited(_warmUpBackend());
   }
 
@@ -60,18 +61,16 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     _voiceSession++;
     _conversationMode = false;
 
-    _speech.stop();
-    _tts.stop();
+    unawaited(_speech.stop());
+    unawaited(_tts.stop());
 
     super.dispose();
   }
 
   Future<void> _warmUpBackend() async {
     try {
-      await http.get(Uri.parse(_healthUrl)).timeout(const Duration(seconds: 8));
-    } catch (_) {
-      // Warm-up fail ho to bhi assistant normally kaam karega.
-    }
+      await http.get(Uri.parse(_healthUrl)).timeout(const Duration(seconds: 6));
+    } catch (_) {}
   }
 
   Future<void> _setupVoice() async {
@@ -82,34 +81,57 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     _voiceInitializing = true;
 
     try {
-      await _tts.setSpeechRate(0.55);
+      await _tts.setSpeechRate(0.58);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.05);
       await _tts.awaitSpeakCompletion(true);
-      await _tts.setLanguage('en-IN');
+      await _tts.setLanguage('hi-IN');
 
       final available = await _speech.initialize(
         onStatus: (status) {
           if (!mounted) return;
 
           if (status == 'done' || status == 'notListening') {
-            if (_listening) {
-              setState(() {
-                _listening = false;
-              });
+            if (_listening &&
+                _currentQuestion.trim().isNotEmpty &&
+                _conversationMode) {
+              unawaited(
+                _finishListening(_voiceSession, _currentQuestion.trim()),
+              );
             }
           }
         },
         onError: (error) {
           if (!mounted) return;
 
+          final message = error.errorMsg.toLowerCase();
+
           setState(() {
             _listening = false;
+          });
+
+          // "no_match" normal situation hai, isko hard error mat dikhao.
+          if (message.contains('no_match') ||
+              message.contains('no match') ||
+              message.contains('timeout')) {
+            if (_conversationMode) {
+              setState(() {
+                _expression = AIRobotExpression.idle;
+              });
+
+              unawaited(_restartListeningAfterError());
+            }
+            return;
+          }
+
+          setState(() {
             _expression = AIRobotExpression.error;
           });
 
           if (_conversationMode) {
-            _showMessage('Voice input error. Please try again.');
+            _showMessage(
+              'Mic start nahi ho paya. Microphone permission check karo.',
+            );
           }
         },
       );
@@ -133,6 +155,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
   Future<void> _startConversation() async {
     final session = ++_voiceSession;
+    _handledResultSession = -1;
 
     await _tts.stop();
     await _speech.stop();
@@ -146,9 +169,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     }
 
     if (!_speechReady) {
-      _showMessage(
-        'Microphone available nahi hai. Please microphone permission check karo.',
-      );
+      _showMessage('Microphone available nahi hai. Permission check karo.');
       return;
     }
 
@@ -166,19 +187,24 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   }
 
   Future<void> _startListening(int session) async {
-    if (!mounted) return;
-
-    if (session != _voiceSession) {
+    if (!mounted ||
+        session != _voiceSession ||
+        !_conversationMode ||
+        _thinking ||
+        _processingQuestion) {
       return;
     }
 
-    if (!_conversationMode || _listening || _thinking || _processingQuestion) {
+    if (_listening) {
       return;
     }
 
     if (!_speechReady) {
-      return;
+      await _setupVoice();
+      if (!_speechReady) return;
     }
+
+    _handledResultSession = -1;
 
     setState(() {
       _listening = true;
@@ -188,15 +214,14 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
     try {
       await _speech.listen(
-        localeId: 'en_IN',
-        listenFor: const Duration(seconds: 10),
-        pauseFor: const Duration(milliseconds: 1200),
+        // System/Android ki available language use hogi.
+        // Hard-coded en_IN hata diya hai taaki Hindi voice input fail na ho.
+        listenFor: const Duration(seconds: 15),
+        pauseFor: const Duration(milliseconds: 800),
         partialResults: true,
-        cancelOnError: true,
+        cancelOnError: false,
         onResult: (result) {
-          if (!mounted) return;
-
-          if (session != _voiceSession) {
+          if (!mounted || session != _voiceSession) {
             return;
           }
 
@@ -225,18 +250,19 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _expression = AIRobotExpression.error;
       });
 
-      _showMessage('Microphone start nahi ho paya.');
+      _showMessage('Microphone start nahi ho paya. Permission check karo.');
     }
   }
 
   Future<void> _finishListening(int session, String question) async {
-    if (!mounted) return;
-
-    if (session != _voiceSession) {
+    if (!mounted ||
+        session != _voiceSession ||
+        !_conversationMode ||
+        _processingQuestion) {
       return;
     }
 
-    if (!_conversationMode || _processingQuestion) {
+    if (_handledResultSession == session) {
       return;
     }
 
@@ -245,6 +271,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     if (cleanQuestion.isEmpty) {
       return;
     }
+
+    _handledResultSession = session;
 
     setState(() {
       _listening = false;
@@ -263,9 +291,20 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     await _askAI(cleanQuestion, session);
   }
 
+  Future<void> _restartListeningAfterError() async {
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+
+    if (!mounted || !_conversationMode || _thinking) {
+      return;
+    }
+
+    final session = _voiceSession;
+
+    await _startListening(session);
+  }
+
   Future<void> _stopConversation() async {
     ++_voiceSession;
-
     _conversationMode = false;
 
     await _speech.stop();
@@ -283,9 +322,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   }
 
   Future<void> _askAI(String question, int session) async {
-    if (!mounted) return;
-
-    if (session != _voiceSession || !_conversationMode) {
+    if (!mounted || session != _voiceSession || !_conversationMode) {
       return;
     }
 
@@ -299,42 +336,45 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      if (!mounted) return;
-
       setState(() {
         _processingQuestion = false;
         _thinking = false;
       });
 
-      await _speak('Please login first.', language: 'en-IN');
+      await _speak('Pehle login kijiye.', language: 'hi-IN');
 
       return;
     }
 
     try {
-      final userDocFuture = _firestore.collection('users').doc(user.uid).get();
+      // User profile sirf FIRST question par Firebase se load hoga.
+      // Har question par dobara read nahi hoga.
+      Map<String, dynamic> userData;
 
-      /*
-       * User profile aur question analysis ko unnecessarily
-       * sequential nahi rakhenge.
-       *
-       * Pehle user role chahiye, uske baad sirf relevant
-       * context Firestore se lenge.
-       */
-      final userDoc = await userDocFuture;
+      if (_cachedUserData != null && _cachedRole != null) {
+        userData = _cachedUserData!;
+      } else {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .get();
 
-      if (!mounted || session != _voiceSession) {
-        return;
+        if (!mounted || session != _voiceSession) {
+          return;
+        }
+
+        userData = userDoc.data() ?? {};
+
+        final role = (userData['role'] ?? 'student')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        _cachedUserData = userData;
+        _cachedRole = role;
       }
 
-      final userData = userDoc.data() ?? {};
-
-      final role = (userData['role'] ?? 'student')
-          .toString()
-          .trim()
-          .toLowerCase();
-
-      final needsData = _questionNeedsCampusData(cleanQuestion, role);
+      final role = _cachedRole ?? 'student';
 
       Map<String, dynamic> context = {
         'name': userData['name'] ?? '',
@@ -342,8 +382,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         'role': role,
       };
 
-      // General question hai to Firebase query mat chalao.
-      if (needsData) {
+      // Sirf CampusX data wala question ho to Firebase query.
+      if (_questionNeedsCampusData(cleanQuestion, role)) {
         context = await _buildContext(
           uid: user.uid,
           role: role,
@@ -356,17 +396,29 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         return;
       }
 
+      // AI ko explicitly Hindi answer instruction.
+      final aiQuestion =
+          '''
+Is question ka jawab ONLY simple Hindi/Hinglish mein do.
+English mein answer mat do.
+Answer short, clear aur useful rakho.
+Agar question general knowledge ka hai to available knowledge ke basis par answer do.
+Agar CampusX data context diya gaya hai to uska use karo.
+Question:
+$cleanQuestion
+''';
+
       final response = await http
           .post(
             Uri.parse(_backendUrl),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
               'role': role,
-              'question': cleanQuestion,
+              'question': aiQuestion,
               'context': context,
             }),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 12));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -388,8 +440,6 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         return;
       }
 
-      final language = _detectLanguage(reply);
-
       setState(() {
         _lastReply = reply;
         _thinking = false;
@@ -397,8 +447,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _expression = AIRobotExpression.speaking;
       });
 
-      // AI response milte hi immediately TTS.
-      await _speak(reply, language: language);
+      // Reply milte hi immediately Hindi TTS.
+      await _speak(reply, language: 'hi-IN');
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -438,8 +488,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       });
 
       await _speak(
-        'Sorry, I could not process that right now.',
-        language: 'en-IN',
+        'Maaf kijiye, abhi jawab nahi mil paya. Dobara poochiye.',
+        language: 'hi-IN',
       );
 
       if (!mounted || session != _voiceSession) {
@@ -496,49 +546,6 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     ];
 
     return campusKeywords.any(q.contains);
-  }
-
-  String _detectLanguage(String text) {
-    final hasHindi = text
-        .split('')
-        .any(
-          (char) =>
-              char.codeUnitAt(0) >= 0x0900 && char.codeUnitAt(0) <= 0x097F,
-        );
-
-    return hasHindi ? 'hi-IN' : 'en-IN';
-  }
-
-  Future<void> _speak(String text, {required String language}) async {
-    try {
-      await _tts.stop();
-
-      await _tts.setLanguage(language);
-      await _tts.setSpeechRate(0.55);
-      await _tts.setVolume(1.0);
-      await _tts.setPitch(1.05);
-
-      if (!mounted) return;
-
-      setState(() {
-        _expression = AIRobotExpression.speaking;
-      });
-
-      await _tts.speak(text);
-    } catch (_) {
-      // TTS failure should not break conversation.
-    }
-  }
-
-  void _resetAfterQuestion() {
-    if (!mounted) return;
-
-    setState(() {
-      _processingQuestion = false;
-      _thinking = false;
-      _listening = false;
-      _expression = AIRobotExpression.idle;
-    });
   }
 
   Future<Map<String, dynamic>> _buildContext({
@@ -652,6 +659,36 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     return context;
   }
 
+  Future<void> _speak(String text, {required String language}) async {
+    try {
+      await _tts.stop();
+
+      await _tts.setLanguage(language);
+      await _tts.setSpeechRate(0.58);
+      await _tts.setVolume(1.0);
+      await _tts.setPitch(1.05);
+
+      if (!mounted) return;
+
+      setState(() {
+        _expression = AIRobotExpression.speaking;
+      });
+
+      await _tts.speak(text);
+    } catch (_) {}
+  }
+
+  void _resetAfterQuestion() {
+    if (!mounted) return;
+
+    setState(() {
+      _processingQuestion = false;
+      _thinking = false;
+      _listening = false;
+      _expression = AIRobotExpression.idle;
+    });
+  }
+
   void _showMessage(String message) {
     if (!mounted) return;
 
@@ -665,172 +702,163 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final screenSize = MediaQuery.of(context).size;
+    final screenWidth = MediaQuery.of(context).size.width;
 
-    // Screen ke hisaab se assistant width.
-    final availableWidth = (screenSize.width - 24).clamp(0.0, 390.0);
+    // Assistant ko screen ke andar safe rakho.
+    final assistantWidth = screenWidth < 360 ? screenWidth - 20 : 350.0;
 
     final showBubble = _lastReply.isNotEmpty || _currentQuestion.isNotEmpty;
 
     return Material(
       color: Colors.transparent,
       child: SafeArea(
-        child: Align(
-          alignment: Alignment.bottomRight,
-          child: SizedBox(
-            width: availableWidth,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (showBubble)
-                  Container(
-                    width: availableWidth - 4,
-                    constraints: const BoxConstraints(maxHeight: 155),
-                    margin: const EdgeInsets.only(bottom: 6, right: 2),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surface.withValues(alpha: 0.97),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: 0.35,
-                        ),
+        child: SizedBox(
+          width: assistantWidth,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (showBubble)
+                Container(
+                  width: assistantWidth,
+                  constraints: const BoxConstraints(maxHeight: 145),
+                  margin: const EdgeInsets.only(bottom: 5),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface.withValues(alpha: 0.97),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.35),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        blurRadius: 16,
+                        spreadRadius: 1,
+                        color: Colors.black.withValues(alpha: 0.25),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          blurRadius: 16,
-                          spreadRadius: 1,
-                          color: Colors.black.withValues(alpha: 0.25),
-                        ),
+                    ],
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_currentQuestion.isNotEmpty) ...[
+                          Text(
+                            'Aap',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _currentQuestion,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                        if (_lastReply.isNotEmpty &&
+                            _currentQuestion.isNotEmpty)
+                          const SizedBox(height: 6),
+                        if (_lastReply.isNotEmpty) ...[
+                          Text(
+                            'CampusX AI',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _lastReply,
+                            maxLines: 5,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ],
                     ),
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (_currentQuestion.isNotEmpty) ...[
-                            Text(
-                              'You',
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: theme.colorScheme.primary,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              _currentQuestion,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                          if (_lastReply.isNotEmpty &&
-                              _currentQuestion.isNotEmpty)
-                            const SizedBox(height: 6),
-                          if (_lastReply.isNotEmpty) ...[
-                            Text(
-                              'CampusX AI',
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: theme.colorScheme.primary,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              _lastReply,
-                              maxLines: 5,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                  ),
+                ),
+
+              // Compact robot + mic.
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  SizedBox(
+                    width: 58,
+                    height: 62,
+                    child: ClipRect(
+                      child: AIRobot(expression: _expression, size: 54),
+                    ),
+                  ),
+
+                  const SizedBox(width: 5),
+
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () async {
+                      if (_conversationMode) {
+                        await _stopConversation();
+                      } else {
+                        await _startConversation();
+                      }
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      height: 50,
+                      width: 50,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _conversationMode
+                            ? Colors.redAccent
+                            : theme.colorScheme.primary,
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: _conversationMode ? 18 : 10,
+                            spreadRadius: 2,
+                            color:
+                                (_conversationMode
+                                        ? Colors.redAccent
+                                        : theme.colorScheme.primary)
+                                    .withValues(alpha: 0.30),
+                          ),
                         ],
                       ),
-                    ),
-                  ),
-
-                // Fixed compact assistant row.
-                // Isse right/bottom overflow ka chance
-                // bahut kam ho jata hai.
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    SizedBox(
-                      width: 58,
-                      height: 64,
-                      child: ClipRect(
-                        child: AIRobot(expression: _expression, size: 58),
-                      ),
-                    ),
-
-                    const SizedBox(width: 4),
-
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () async {
-                        if (_conversationMode) {
-                          await _stopConversation();
-                        } else {
-                          await _startConversation();
-                        }
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        height: 50,
-                        width: 50,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _conversationMode
-                              ? Colors.redAccent
-                              : theme.colorScheme.primary,
-                          boxShadow: [
-                            BoxShadow(
-                              blurRadius: _conversationMode ? 18 : 10,
-                              spreadRadius: 2,
-                              color:
-                                  (_conversationMode
-                                          ? Colors.redAccent
-                                          : theme.colorScheme.primary)
-                                      .withValues(alpha: 0.30),
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          _conversationMode
-                              ? Icons.stop_rounded
-                              : Icons.mic_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 2),
-
-                Padding(
-                  padding: const EdgeInsets.only(right: 2),
-                  child: Text(
-                    _conversationMode
-                        ? (_listening
-                              ? 'Listening...'
-                              : _thinking
-                              ? 'Thinking...'
-                              : 'Talking with CampusX')
-                        : 'Ask CampusX',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.75,
+                      child: Icon(
+                        _conversationMode
+                            ? Icons.stop_rounded
+                            : Icons.mic_rounded,
+                        color: Colors.white,
+                        size: 24,
                       ),
                     ),
                   ),
+                ],
+              ),
+
+              const SizedBox(height: 2),
+
+              Padding(
+                padding: const EdgeInsets.only(right: 2),
+                child: Text(
+                  _conversationMode
+                      ? (_listening
+                            ? 'Sun raha hoon...'
+                            : _thinking
+                            ? 'Soch raha hoon...'
+                            : 'CampusX AI bol raha hai...')
+                      : 'CampusX AI se poochho',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.75),
+                  ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

@@ -404,7 +404,11 @@ class HomeScreen extends StatelessWidget {
               // =========================
               // FLOATING AI ROBOT
               // =========================
-              const Positioned(right: 8, bottom: 14, child: AIVoiceAssistant()),
+              const Positioned(
+                right: 12,
+                bottom: 95,
+                child: AIVoiceAssistant(),
+              ),
             ],
           ),
         ),
