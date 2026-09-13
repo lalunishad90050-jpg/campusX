@@ -1,5 +1,6 @@
 // ignore_for_file: deprecated_member_use
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -26,6 +27,9 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   static const String _backendUrl =
       'https://campusx-backend-43jp.onrender.com/assistant/chat';
 
+  static const String _healthUrl =
+      'https://campusx-backend-43jp.onrender.com/health';
+
   AIRobotExpression _expression = AIRobotExpression.idle;
 
   bool _speechReady = false;
@@ -43,7 +47,12 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   @override
   void initState() {
     super.initState();
+
     _setupVoice();
+
+    // Render backend ko background me wake-up kar do.
+    // Isse first AI question ka cold-start delay kam ho sakta hai.
+    unawaited(_warmUpBackend());
   }
 
   @override
@@ -57,6 +66,14 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     super.dispose();
   }
 
+  Future<void> _warmUpBackend() async {
+    try {
+      await http.get(Uri.parse(_healthUrl)).timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // Warm-up fail ho to bhi assistant normally kaam karega.
+    }
+  }
+
   Future<void> _setupVoice() async {
     if (_voiceInitializing || _speechReady) {
       return;
@@ -65,11 +82,10 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     _voiceInitializing = true;
 
     try {
-      await _tts.setSpeechRate(0.48);
+      await _tts.setSpeechRate(0.55);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.05);
       await _tts.awaitSpeakCompletion(true);
-
       await _tts.setLanguage('en-IN');
 
       final available = await _speech.initialize(
@@ -173,8 +189,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     try {
       await _speech.listen(
         localeId: 'en_IN',
-        listenFor: const Duration(seconds: 12),
-        pauseFor: const Duration(seconds: 2),
+        listenFor: const Duration(seconds: 10),
+        pauseFor: const Duration(milliseconds: 1200),
         partialResults: true,
         cancelOnError: true,
         onResult: (result) {
@@ -195,7 +211,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
           });
 
           if (result.finalResult) {
-            _finishListening(session, words);
+            unawaited(_finishListening(session, words));
           }
         },
       );
@@ -220,11 +236,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       return;
     }
 
-    if (!_conversationMode) {
-      return;
-    }
-
-    if (_processingQuestion) {
+    if (!_conversationMode || _processingQuestion) {
       return;
     }
 
@@ -273,11 +285,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   Future<void> _askAI(String question, int session) async {
     if (!mounted) return;
 
-    if (session != _voiceSession) {
-      return;
-    }
-
-    if (!_conversationMode) {
+    if (session != _voiceSession || !_conversationMode) {
       return;
     }
 
@@ -304,7 +312,16 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     }
 
     try {
-      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      final userDocFuture = _firestore.collection('users').doc(user.uid).get();
+
+      /*
+       * User profile aur question analysis ko unnecessarily
+       * sequential nahi rakhenge.
+       *
+       * Pehle user role chahiye, uske baad sirf relevant
+       * context Firestore se lenge.
+       */
+      final userDoc = await userDocFuture;
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -317,11 +334,23 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
           .trim()
           .toLowerCase();
 
-      final context = await _buildContext(
-        uid: user.uid,
-        role: role,
-        userData: userData,
-      );
+      final needsData = _questionNeedsCampusData(cleanQuestion, role);
+
+      Map<String, dynamic> context = {
+        'name': userData['name'] ?? '',
+        'email': userData['email'] ?? '',
+        'role': role,
+      };
+
+      // General question hai to Firebase query mat chalao.
+      if (needsData) {
+        context = await _buildContext(
+          uid: user.uid,
+          role: role,
+          userData: userData,
+          question: cleanQuestion,
+        );
+      }
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -337,7 +366,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
               'context': context,
             }),
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 15));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -368,7 +397,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _expression = AIRobotExpression.speaking;
       });
 
-      // AI reply ko turant voice me bolna.
+      // AI response milte hi immediately TTS.
       await _speak(reply, language: language);
 
       if (!mounted || session != _voiceSession) {
@@ -387,8 +416,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _expression = AIRobotExpression.idle;
       });
 
-      // Very small gap, then listen again.
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -427,7 +455,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _currentQuestion = '';
       });
 
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -437,6 +465,37 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         await _startListening(session);
       }
     }
+  }
+
+  bool _questionNeedsCampusData(String question, String role) {
+    final q = question.toLowerCase();
+
+    const campusKeywords = [
+      'attendance',
+      'present',
+      'absent',
+      'student',
+      'students',
+      'safety',
+      'report',
+      'reports',
+      'campus',
+      'dark area',
+      'dark areas',
+      'broken light',
+      'broken lights',
+      'resolved',
+      'reviewing',
+      'college',
+      'meri',
+      'mere',
+      'kitni',
+      'kitne',
+      'aaj',
+      'today',
+    ];
+
+    return campusKeywords.any(q.contains);
   }
 
   String _detectLanguage(String text) {
@@ -455,7 +514,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       await _tts.stop();
 
       await _tts.setLanguage(language);
-      await _tts.setSpeechRate(0.48);
+      await _tts.setSpeechRate(0.55);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.05);
 
@@ -467,7 +526,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
       await _tts.speak(text);
     } catch (_) {
-      // TTS failure should not break the conversation.
+      // TTS failure should not break conversation.
     }
   }
 
@@ -486,6 +545,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     required String uid,
     required String role,
     required Map<String, dynamic> userData,
+    required String question,
   }) async {
     final context = <String, dynamic>{
       'name': userData['name'] ?? '',
@@ -493,8 +553,15 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       'role': role,
     };
 
-    // STUDENT CONTEXT
-    if (role == 'student') {
+    final q = question.toLowerCase();
+
+    // STUDENT ATTENDANCE
+    if (role == 'student' &&
+        (q.contains('attendance') ||
+            q.contains('present') ||
+            q.contains('absent') ||
+            q.contains('meri') ||
+            q.contains('aaj'))) {
       final snapshot = await _firestore
           .collection('attendance')
           .where('userId', isEqualTo: uid)
@@ -504,8 +571,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       int absent = 0;
 
       for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final status = data['status'];
+        final status = doc.data()['status'];
 
         if (status == 'present') {
           present++;
@@ -524,16 +590,20 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       };
     }
 
-    // TEACHER CONTEXT
-    if (role == 'teacher') {
+    // TEACHER ATTENDANCE
+    if (role == 'teacher' &&
+        (q.contains('attendance') ||
+            q.contains('present') ||
+            q.contains('absent') ||
+            q.contains('student') ||
+            q.contains('students'))) {
       final snapshot = await _firestore.collection('attendance').get();
 
       int present = 0;
       int absent = 0;
 
       for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final status = data['status'];
+        final status = doc.data()['status'];
 
         if (status == 'present') {
           present++;
@@ -549,17 +619,21 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       };
     }
 
-    // ADMIN CONTEXT
-    if (role == 'admin') {
+    // ADMIN SAFETY
+    if (role == 'admin' &&
+        (q.contains('safety') ||
+            q.contains('report') ||
+            q.contains('reports') ||
+            q.contains('campus') ||
+            q.contains('dark') ||
+            q.contains('light'))) {
       final snapshot = await _firestore.collection('safety_reports').get();
 
       int open = 0;
       int resolved = 0;
 
       for (final doc in snapshot.docs) {
-        final data = doc.data();
-
-        final status = (data['status'] ?? 'new').toString().toLowerCase();
+        final status = (doc.data()['status'] ?? 'new').toString().toLowerCase();
 
         if (status == 'resolved') {
           resolved++;
@@ -593,9 +667,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
     final theme = Theme.of(context);
     final screenSize = MediaQuery.of(context).size;
 
-    final maxAssistantWidth = screenSize.width > 420
-        ? 390.0
-        : screenSize.width - 16;
+    // Screen ke hisaab se assistant width.
+    final availableWidth = (screenSize.width - 24).clamp(0.0, 390.0);
 
     final showBubble = _lastReply.isNotEmpty || _currentQuestion.isNotEmpty;
 
@@ -604,93 +677,93 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       child: SafeArea(
         child: Align(
           alignment: Alignment.bottomRight,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: maxAssistantWidth,
-              maxHeight: screenSize.height * 0.55,
-            ),
+          child: SizedBox(
+            width: availableWidth,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 if (showBubble)
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: maxAssistantWidth - 8,
-                      maxHeight: 190,
-                    ),
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 8, right: 4),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surface.withValues(
-                          alpha: 0.97,
+                  Container(
+                    width: availableWidth - 4,
+                    constraints: const BoxConstraints(maxHeight: 155),
+                    margin: const EdgeInsets.only(bottom: 6, right: 2),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface.withValues(alpha: 0.97),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: theme.colorScheme.primary.withValues(
+                          alpha: 0.35,
                         ),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: theme.colorScheme.primary.withValues(
-                            alpha: 0.35,
-                          ),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            blurRadius: 18,
-                            spreadRadius: 1,
-                            color: Colors.black.withValues(alpha: 0.25),
-                          ),
-                        ],
                       ),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (_currentQuestion.isNotEmpty) ...[
-                              Text(
-                                'You',
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: theme.colorScheme.primary,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                _currentQuestion,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                            if (_lastReply.isNotEmpty &&
-                                _currentQuestion.isNotEmpty)
-                              const SizedBox(height: 8),
-                            if (_lastReply.isNotEmpty) ...[
-                              Text(
-                                'CampusX AI',
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: theme.colorScheme.primary,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                _lastReply,
-                                maxLines: 7,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ],
+                      boxShadow: [
+                        BoxShadow(
+                          blurRadius: 16,
+                          spreadRadius: 1,
+                          color: Colors.black.withValues(alpha: 0.25),
                         ),
+                      ],
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (_currentQuestion.isNotEmpty) ...[
+                            Text(
+                              'You',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _currentQuestion,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                          if (_lastReply.isNotEmpty &&
+                              _currentQuestion.isNotEmpty)
+                            const SizedBox(height: 6),
+                          if (_lastReply.isNotEmpty) ...[
+                            Text(
+                              'CampusX AI',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _lastReply,
+                              maxLines: 5,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ),
 
+                // Fixed compact assistant row.
+                // Isse right/bottom overflow ka chance
+                // bahut kam ho jata hai.
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    AIRobot(expression: _expression, size: 70),
+                    SizedBox(
+                      width: 58,
+                      height: 64,
+                      child: ClipRect(
+                        child: AIRobot(expression: _expression, size: 58),
+                      ),
+                    ),
 
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
 
                     GestureDetector(
                       behavior: HitTestBehavior.opaque,
@@ -702,9 +775,9 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
                         }
                       },
                       child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        height: 54,
-                        width: 54,
+                        duration: const Duration(milliseconds: 180),
+                        height: 50,
+                        width: 50,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: _conversationMode
@@ -712,13 +785,13 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
                               : theme.colorScheme.primary,
                           boxShadow: [
                             BoxShadow(
-                              blurRadius: _conversationMode ? 20 : 12,
+                              blurRadius: _conversationMode ? 18 : 10,
                               spreadRadius: 2,
                               color:
                                   (_conversationMode
                                           ? Colors.redAccent
                                           : theme.colorScheme.primary)
-                                      .withValues(alpha: 0.35),
+                                      .withValues(alpha: 0.30),
                             ),
                           ],
                         ),
@@ -727,14 +800,14 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
                               ? Icons.stop_rounded
                               : Icons.mic_rounded,
                           color: Colors.white,
-                          size: 26,
+                          size: 24,
                         ),
                       ),
                     ),
                   ],
                 ),
 
-                const SizedBox(height: 3),
+                const SizedBox(height: 2),
 
                 Padding(
                   padding: const EdgeInsets.only(right: 2),
