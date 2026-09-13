@@ -720,11 +720,7 @@ class _TeacherDashboardScreenState extends State<TeacherDashboardScreen> {
                 ),
 
                 // CampusX AI floating assistant
-                const Positioned(
-                  right: 12,
-                  bottom: 95,
-                  child: AIVoiceAssistant(),
-                ),
+                const Positioned(left: 18, top: 15, child: AIVoiceAssistant()),
               ],
             ),
     );

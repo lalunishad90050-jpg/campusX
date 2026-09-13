@@ -30,6 +30,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   static const String _healthUrl =
       'https://campusx-backend-43jp.onrender.com/health';
 
+  static const String _hindiLanguage = 'hi-IN';
+
   AIRobotExpression _expression = AIRobotExpression.idle;
 
   bool _speechReady = false;
@@ -38,6 +40,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   bool _thinking = false;
   bool _conversationMode = false;
   bool _processingQuestion = false;
+  bool _ttsReady = false;
 
   int _voiceSession = 0;
   int _handledResultSession = -1;
@@ -74,19 +77,76 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   }
 
   Future<void> _setupVoice() async {
-    if (_voiceInitializing || _speechReady) {
+    if (_voiceInitializing) {
       return;
     }
 
     _voiceInitializing = true;
 
     try {
-      await _tts.setSpeechRate(0.58);
+      // -------------------------
+      // TEXT TO SPEECH
+      // -------------------------
       await _tts.setVolume(1.0);
+      await _tts.setSpeechRate(0.52);
       await _tts.setPitch(1.05);
       await _tts.awaitSpeakCompletion(true);
-      await _tts.setLanguage('hi-IN');
 
+      bool hindiAvailable = false;
+
+      try {
+        final result = await _tts.isLanguageAvailable(_hindiLanguage);
+        hindiAvailable = result == true;
+      } catch (_) {
+        // Some Android TTS engines don't return this reliably.
+        hindiAvailable = true;
+      }
+
+      if (hindiAvailable) {
+        await _tts.setLanguage(_hindiLanguage);
+      }
+
+      _tts.setStartHandler(() {
+        if (!mounted) return;
+
+        setState(() {
+          _expression = AIRobotExpression.speaking;
+        });
+      });
+
+      _tts.setCompletionHandler(() {
+        if (!mounted) return;
+
+        if (!_listening && !_thinking) {
+          setState(() {
+            _expression = AIRobotExpression.idle;
+          });
+        }
+      });
+
+      _tts.setCancelHandler(() {
+        if (!mounted) return;
+
+        if (!_listening && !_thinking) {
+          setState(() {
+            _expression = AIRobotExpression.idle;
+          });
+        }
+      });
+
+      _tts.setErrorHandler((message) {
+        if (!mounted) return;
+
+        setState(() {
+          _expression = AIRobotExpression.error;
+        });
+      });
+
+      _ttsReady = true;
+
+      // -------------------------
+      // SPEECH TO TEXT
+      // -------------------------
       final available = await _speech.initialize(
         onStatus: (status) {
           if (!mounted) return;
@@ -110,7 +170,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
             _listening = false;
           });
 
-          // "no_match" normal situation hai, isko hard error mat dikhao.
+          // Normal situations.
           if (message.contains('no_match') ||
               message.contains('no match') ||
               message.contains('timeout')) {
@@ -121,6 +181,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
               unawaited(_restartListeningAfterError());
             }
+
             return;
           }
 
@@ -146,6 +207,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
       setState(() {
         _speechReady = false;
+        _ttsReady = false;
         _expression = AIRobotExpression.error;
       });
     } finally {
@@ -155,12 +217,13 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
   Future<void> _startConversation() async {
     final session = ++_voiceSession;
+
     _handledResultSession = -1;
 
-    await _tts.stop();
     await _speech.stop();
+    await _tts.stop();
 
-    if (!_speechReady) {
+    if (!_speechReady || !_ttsReady) {
       await _setupVoice();
     }
 
@@ -170,6 +233,11 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
     if (!_speechReady) {
       _showMessage('Microphone available nahi hai. Permission check karo.');
+      return;
+    }
+
+    if (!_ttsReady) {
+      _showMessage('Hindi voice engine available nahi hai.');
       return;
     }
 
@@ -201,7 +269,10 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
     if (!_speechReady) {
       await _setupVoice();
-      if (!_speechReady) return;
+
+      if (!_speechReady) {
+        return;
+      }
     }
 
     _handledResultSession = -1;
@@ -214,10 +285,8 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
     try {
       await _speech.listen(
-        // System/Android ki available language use hogi.
-        // Hard-coded en_IN hata diya hai taaki Hindi voice input fail na ho.
         listenFor: const Duration(seconds: 15),
-        pauseFor: const Duration(milliseconds: 800),
+        pauseFor: const Duration(milliseconds: 900),
         partialResults: true,
         cancelOnError: false,
         onResult: (result) {
@@ -292,9 +361,9 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
   }
 
   Future<void> _restartListeningAfterError() async {
-    await Future<void>.delayed(const Duration(milliseconds: 250));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
 
-    if (!mounted || !_conversationMode || _thinking) {
+    if (!mounted || !_conversationMode || _thinking || _processingQuestion) {
       return;
     }
 
@@ -305,6 +374,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
 
   Future<void> _stopConversation() async {
     ++_voiceSession;
+
     _conversationMode = false;
 
     await _speech.stop();
@@ -317,6 +387,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
       _thinking = false;
       _processingQuestion = false;
       _currentQuestion = '';
+      _lastReply = '';
       _expression = AIRobotExpression.idle;
     });
   }
@@ -341,16 +412,15 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         _thinking = false;
       });
 
-      await _speak('Pehle login kijiye.', language: 'hi-IN');
+      await _speak('Pehle login kijiye.', language: _hindiLanguage);
 
       return;
     }
 
     try {
-      // User profile sirf FIRST question par Firebase se load hoga.
-      // Har question par dobara read nahi hoga.
       Map<String, dynamic> userData;
 
+      // Profile only once.
       if (_cachedUserData != null && _cachedRole != null) {
         userData = _cachedUserData!;
       } else {
@@ -382,7 +452,7 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         'role': role,
       };
 
-      // Sirf CampusX data wala question ho to Firebase query.
+      // Only fetch Firestore data when required.
       if (_questionNeedsCampusData(cleanQuestion, role)) {
         context = await _buildContext(
           uid: user.uid,
@@ -396,14 +466,20 @@ class _AIVoiceAssistantState extends State<AIVoiceAssistant> {
         return;
       }
 
-      // AI ko explicitly Hindi answer instruction.
       final aiQuestion =
           '''
 Is question ka jawab ONLY simple Hindi/Hinglish mein do.
+
 English mein answer mat do.
+
 Answer short, clear aur useful rakho.
-Agar question general knowledge ka hai to available knowledge ke basis par answer do.
-Agar CampusX data context diya gaya hai to uska use karo.
+
+Agar question general knowledge ka hai,
+to available knowledge ke basis par answer do.
+
+Agar CampusX data context diya gaya hai,
+to uska use karo.
+
 Question:
 $cleanQuestion
 ''';
@@ -447,8 +523,8 @@ $cleanQuestion
         _expression = AIRobotExpression.speaking;
       });
 
-      // Reply milte hi immediately Hindi TTS.
-      await _speak(reply, language: 'hi-IN');
+      // Speak immediately after AI response.
+      await _speak(reply, language: _hindiLanguage);
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -466,7 +542,7 @@ $cleanQuestion
         _expression = AIRobotExpression.idle;
       });
 
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -489,7 +565,7 @@ $cleanQuestion
 
       await _speak(
         'Maaf kijiye, abhi jawab nahi mil paya. Dobara poochiye.',
-        language: 'hi-IN',
+        language: _hindiLanguage,
       );
 
       if (!mounted || session != _voiceSession) {
@@ -505,7 +581,7 @@ $cleanQuestion
         _currentQuestion = '';
       });
 
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
       if (!mounted || session != _voiceSession) {
         return;
@@ -562,7 +638,9 @@ $cleanQuestion
 
     final q = question.toLowerCase();
 
+    // -------------------------
     // STUDENT ATTENDANCE
+    // -------------------------
     if (role == 'student' &&
         (q.contains('attendance') ||
             q.contains('present') ||
@@ -597,7 +675,9 @@ $cleanQuestion
       };
     }
 
+    // -------------------------
     // TEACHER ATTENDANCE
+    // -------------------------
     if (role == 'teacher' &&
         (q.contains('attendance') ||
             q.contains('present') ||
@@ -626,7 +706,9 @@ $cleanQuestion
       };
     }
 
+    // -------------------------
     // ADMIN SAFETY
+    // -------------------------
     if (role == 'admin' &&
         (q.contains('safety') ||
             q.contains('report') ||
@@ -660,13 +742,36 @@ $cleanQuestion
   }
 
   Future<void> _speak(String text, {required String language}) async {
+    final cleanText = text.trim();
+
+    if (cleanText.isEmpty) {
+      return;
+    }
+
     try {
+      if (!_ttsReady) {
+        await _setupVoice();
+      }
+
+      if (!_ttsReady) {
+        return;
+      }
+
       await _tts.stop();
 
-      await _tts.setLanguage(language);
-      await _tts.setSpeechRate(0.58);
       await _tts.setVolume(1.0);
+      await _tts.setSpeechRate(0.52);
       await _tts.setPitch(1.05);
+
+      final selectedLanguage = language.trim().isEmpty
+          ? _hindiLanguage
+          : language;
+
+      try {
+        await _tts.setLanguage(selectedLanguage);
+      } catch (_) {
+        await _tts.setLanguage(_hindiLanguage);
+      }
 
       if (!mounted) return;
 
@@ -674,8 +779,14 @@ $cleanQuestion
         _expression = AIRobotExpression.speaking;
       });
 
-      await _tts.speak(text);
-    } catch (_) {}
+      await _tts.speak(cleanText);
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _expression = AIRobotExpression.error;
+      });
+    }
   }
 
   void _resetAfterQuestion() {
@@ -704,8 +815,8 @@ $cleanQuestion
     final theme = Theme.of(context);
     final screenWidth = MediaQuery.of(context).size.width;
 
-    // Assistant ko screen ke andar safe rakho.
-    final assistantWidth = screenWidth < 360 ? screenWidth - 20 : 350.0;
+    // Keep the complete assistant safely inside the screen.
+    final assistantWidth = screenWidth < 360 ? screenWidth - 24 : 350.0;
 
     final showBubble = _lastReply.isNotEmpty || _currentQuestion.isNotEmpty;
 
@@ -718,11 +829,14 @@ $cleanQuestion
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              // -------------------------
+              // AI MESSAGE BUBBLE
+              // -------------------------
               if (showBubble)
                 Container(
                   width: assistantWidth,
                   constraints: const BoxConstraints(maxHeight: 145),
-                  margin: const EdgeInsets.only(bottom: 5),
+                  margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surface.withValues(alpha: 0.97),
@@ -781,20 +895,25 @@ $cleanQuestion
                   ),
                 ),
 
-              // Compact robot + mic.
+              // -------------------------
+              // ROBOT + MIC
+              // -------------------------
               Row(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  // Larger robot with enough room.
                   SizedBox(
-                    width: 58,
-                    height: 62,
-                    child: ClipRect(
-                      child: AIRobot(expression: _expression, size: 54),
+                    width: 92,
+                    height: 110,
+                    child: Center(
+                      child: ClipRect(
+                        child: AIRobot(expression: _expression, size: 82),
+                      ),
                     ),
                   ),
 
-                  const SizedBox(width: 5),
+                  const SizedBox(width: 7),
 
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -807,8 +926,8 @@ $cleanQuestion
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 180),
-                      height: 50,
-                      width: 50,
+                      height: 54,
+                      width: 54,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: _conversationMode
@@ -831,14 +950,14 @@ $cleanQuestion
                             ? Icons.stop_rounded
                             : Icons.mic_rounded,
                         color: Colors.white,
-                        size: 24,
+                        size: 26,
                       ),
                     ),
                   ),
                 ],
               ),
 
-              const SizedBox(height: 2),
+              const SizedBox(height: 3),
 
               Padding(
                 padding: const EdgeInsets.only(right: 2),

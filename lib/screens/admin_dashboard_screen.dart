@@ -659,7 +659,7 @@ class AdminDashboardScreen extends StatelessWidget {
             },
           ),
 
-          const Positioned(right: 12, bottom: 95, child: AIVoiceAssistant()),
+          const Positioned(left: 18, top: 15, child: AIVoiceAssistant()),
         ],
       ),
     );
